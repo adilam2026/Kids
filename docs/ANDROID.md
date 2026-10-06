@@ -80,6 +80,6 @@ Icônes : `npm run android:icons` (Playwright requis ; les PNG sont versionnés)
 | Interface embarquée (build `www`) dans **Chromium mobile**, origine ≠ API : connexion, jeton stocké, aucun cookie, reconnexion après fermeture, synchro app ↔ web, retrait de membre, hors ligne, Retour (via le pont), zones de sécurité, clavier simulé, export, 2ᵉ parent | **Testé** (`npm run native-test`) — plugins natifs **simulés** |
 | Génération de la clé, extraction de l'empreinte, vérification d'APK (signature/identité/version, cas d'échec) | **Testé en local** (avec un faux `apksigner`/`aapt2`) |
 | Synchronisation Capacitor (`cap sync`), YAML du workflow | **Exécuté / validé** |
-| **Compilation Gradle de l'APK** | **Non exécutable dans mon environnement** → voir le résultat du workflow « Compilation de contrôle » sur GitHub |
+| **Compilation Gradle de l'APK** | **Réussie sur GitHub Actions** (workflow « Compilation de contrôle », run n° 1, commit `7bebc6a`, `assembleDebug` en 1 min 40 s, APK de contrôle produit — signé avec une clé de débogage, non publié). Non exécutable dans mon propre environnement. |
 | APK signé | **Pas encore produit** (nécessite l'étape 1) |
 | Installation, icône, Retour, clavier, zones de sécurité, partage de fichier, reprise sur un **vrai téléphone Android** | **Non testé** — à faire après installation (liste dans le bilan) |
