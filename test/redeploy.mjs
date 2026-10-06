@@ -2,11 +2,9 @@
 // Vérifie migrations idempotentes, /healthz, session persistante et conservation des points.
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
-import pg from 'pg';
+import { resetTestDatabase } from './guard.js';
 
-const DB = process.env.DATABASE_URL || 'postgres://postgres@localhost:5433/kids_test';
-const admin = new pg.Client({ connectionString: DB });
-await admin.connect(); await admin.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;'); await admin.end();
+const DB = await resetTestDatabase();
 
 const PORT = 3217, base = `http://127.0.0.1:${PORT}`;
 const start = () => new Promise((resolve, reject) => {

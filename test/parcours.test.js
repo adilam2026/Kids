@@ -419,3 +419,84 @@ test('conservation des données après redéploiement (redémarrage + migrations
     assert.equal((await c2.state()).children.find((c) => c.id === kids[0]).balance, 7);
   } finally { srv2.close(); }
 });
+
+test('secours du compte propriétaire : codes de secours à usage unique, sans e-mail', async () => {
+  const c = new Client(S.base);
+  const em = `own-${crypto.randomUUID()}@ex.fr`;
+  const reg = await c.post('/api/auth/register', { email: em, name: 'Maman', password: 'mot-de-passe-initial', familyName: 'F' });
+  assert.equal(reg.body.recoveryCodes.length, 8);
+  assert.ok(reg.body.recoveryCodes.every((x) => /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(x)));
+  assert.equal((await c.get('/api/auth/me')).body.recoveryRemaining, 8);
+  // stockés hachés
+  const rows = (await S.query('SELECT code_hash FROM recovery_codes')).rows;
+  assert.ok(!rows.some((r) => reg.body.recoveryCodes.some((x) => r.code_hash.includes(x.replace(/-/g, '')))));
+  const [c1, c2] = reg.body.recoveryCodes;
+  const anon = new Client(S.base);
+  assert.equal((await anon.post('/api/auth/recover', { email: em, code: 'AAAA-BBBB-CCCC', password: 'nouveau-mot-de-passe' })).status, 400);
+  assert.equal((await anon.post('/api/auth/recover', { email: 'inconnu@ex.fr', code: c1, password: 'nouveau-mot-de-passe' })).status, 400, 'même message si le compte n’existe pas');
+  const ok = await anon.post('/api/auth/recover', { email: em, code: c1.toLowerCase(), password: 'nouveau-mot-de-passe' });
+  assert.equal(ok.status, 200);
+  assert.equal((await anon.post('/api/auth/recover', { email: em, code: c1, password: 'encore-un-autre-mdp' })).status, 400, 'usage unique');
+  assert.equal((await c.get('/api/family/state')).status, 401, 'anciennes sessions révoquées');
+  assert.equal((await anon.post('/api/auth/login', { email: em, password: 'mot-de-passe-initial' })).status, 401);
+  assert.equal((await anon.post('/api/auth/login', { email: em, password: 'nouveau-mot-de-passe' })).status, 200);
+  assert.equal((await anon.get('/api/auth/me')).body.recoveryRemaining, 7);
+  // régénération : exige le mot de passe et invalide les anciens codes
+  assert.equal((await anon.post('/api/auth/recovery-codes', { password: 'faux-faux-faux' })).status, 403);
+  const regen = await anon.post('/api/auth/recovery-codes', { password: 'nouveau-mot-de-passe' });
+  assert.equal(regen.body.recoveryCodes.length, 8);
+  const other = new Client(S.base);
+  assert.equal((await other.post('/api/auth/recover', { email: em, code: c2, password: 'dernier-mot-de-passe' })).status, 400, 'ancien code invalidé');
+  assert.equal((await other.post('/api/auth/recover', { email: em, code: regen.body.recoveryCodes[0], password: 'dernier-mot-de-passe' })).status, 200);
+  // le code d'un compte ne sert pas pour un autre compte
+  const em2 = `own2-${crypto.randomUUID()}@ex.fr`;
+  const r2 = await new Client(S.base).post('/api/auth/register', { email: em2, name: 'B', password: 'mot-de-passe-initial' });
+  assert.equal((await new Client(S.base).post('/api/auth/recover', { email: em, code: r2.body.recoveryCodes[0], password: 'pirate-mot-de-passe' })).status, 400);
+  // limitation des tentatives
+  limits.enabled = true; resetLimits();
+  try {
+    const sts = [];
+    for (let i = 0; i < 8; i++) sts.push((await new Client(S.base).post('/api/auth/recover', { email: em, code: 'ZZZZ-ZZZZ-ZZZZ', password: 'pirate-mot-de-passe' })).status);
+    assert.equal(sts[0], 400); assert.equal(sts.at(-1), 429);
+  } finally { limits.enabled = false; resetLimits(); }
+});
+
+test('membre retiré : session ouverte invalide immédiatement, plus aucune donnée', async () => {
+  const { parent, kids } = await newFamily(S.base);
+  const inv = await parent.post('/api/family/invites');
+  const p2 = new Client(S.base);
+  const em = `rm-${crypto.randomUUID()}@ex.fr`;
+  await p2.post('/api/auth/register', { email: em, name: 'M', password: 'motdepasse-solide' });
+  await p2.post('/api/family/join', { code: inv.body.code });
+  const uid = (await p2.get('/api/auth/me')).body.user.id;
+  await parent.post(`/api/family/members/${uid}/approve`);
+  const stale = p2.cookie; // session déjà ouverte (autre onglet / appareil)
+  assert.equal((await p2.get(`/api/children/${kids[0]}/history`)).status, 200);
+  await parent.delete(`/api/family/members/${uid}`);
+  for (const [m, path, body] of [['GET', '/api/family/state'], ['GET', `/api/children/${kids[0]}/history`], ['GET', '/api/family/export'],
+    ['POST', `/api/children/${kids[0]}/points`, { value: 5 }], ['POST', '/api/family/invites', {}]]) {
+    const r = await p2.req(m, path, body);
+    assert.equal(r.status, 401, `${m} ${path}`);
+  }
+  assert.equal((await S.query('SELECT count(*) FROM sessions WHERE user_id=$1', [uid])).rows[0].count, 0);
+  // reconnexion : compte conservé mais sans famille → toujours aucun accès
+  const again = new Client(S.base); again.cookie = '';
+  await again.post('/api/auth/login', { email: em, password: 'motdepasse-solide' });
+  assert.equal((await again.get('/api/auth/me')).body.membership, null);
+  assert.equal((await again.get('/api/family/state')).status, 403);
+  assert.equal((await again.post(`/api/children/${kids[0]}/points`, { value: 5 })).status, 403);
+  assert.ok(stale);
+  assert.equal(await balance(parent, kids[0]), 0);
+});
+
+test('réponses API : jamais mises en cache (partagées ou locales)', async () => {
+  const { parent } = await newFamily(S.base);
+  for (const path of ['/api/family/state', '/api/auth/me', '/api/meta']) {
+    const r = await fetch(S.base + path, { headers: { cookie: parent.cookie } });
+    assert.match(r.headers.get('cache-control'), /no-store/, path);
+  }
+  const lo = await fetch(S.base + '/api/auth/logout', { method: 'POST', headers: { cookie: parent.cookie, 'content-type': 'application/json', 'x-op-id': crypto.randomUUID() }, body: '{}' });
+  assert.match(lo.headers.get('clear-site-data') || '', /cache/);
+  const sw = await (await fetch(S.base + '/sw.js')).text();
+  assert.ok(/pathname\.startsWith\('\/api\/'\)/.test(sw), 'le service worker ignore /api/');
+});

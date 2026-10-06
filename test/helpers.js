@@ -1,17 +1,13 @@
 import crypto from 'node:crypto';
-import pg from 'pg';
 import { createApp } from '../server/app.js';
 import { migrate } from '../server/migrate.js';
 import { getPool, closePool } from '../server/db.js';
 import { limits, resetLimits } from '../server/util.js';
 
-process.env.DATABASE_URL ||= 'postgres://postgres@localhost:5433/kids_test';
+import { resetTestDatabase } from './guard.js';
 
 export async function startServer() {
-  const admin = new pg.Client({ connectionString: process.env.DATABASE_URL });
-  await admin.connect();
-  await admin.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-  await admin.end();
+  await resetTestDatabase();
   await migrate(() => {});
   const server = createApp().listen(0);
   await new Promise((r) => server.once('listening', r));

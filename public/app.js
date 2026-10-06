@@ -19,9 +19,27 @@ const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } cat
 
 const S = {
   me: null, st: null, offline: false, busy: false, sheet: null, pulse: null,
-  prefs: load('ph_prefs', { anim: true }), lock: load('ph_lock', { on: false }),
+  prefs: load('ph_prefs', { anim: !matchMedia('(prefers-reduced-motion: reduce)').matches }), lock: load('ph_lock', { on: false }),
   rewardChild: null, hist: null, auth: { mode: 'login', error: '', info: '' }, libOpen: false,
 };
+
+// ---------- données locales ----------
+const CACHE_MAX_AGE = 7 * 86400000; // une copie hors connexion plus vieille est ignorée
+// Efface tout ce qui appartient à la famille sur cet appareil (déconnexion, session révoquée, autre compte).
+function wipeLocal() {
+  try { localStorage.removeItem('ph_cache'); } catch { /* indisponible */ }
+  stopPolling();
+  S.st = null; S.hist = null; S.rewardChild = null; S.sheet = null; S.undo = null; S.recovery = null;
+  intents.clear();
+  const sh = document.getElementById('sheet'); if (sh) sh.innerHTML = '';
+  const t = document.getElementById('toast'); if (t) t.innerHTML = '';
+  document.body.classList.remove('sheet-open');
+}
+function readCache(userId) {
+  const c = load('ph_cache', null);
+  if (!c?.st || !c.userId || (userId && c.userId !== userId) || Date.now() - c.at > CACHE_MAX_AGE) return null;
+  return c;
+}
 
 // ---------- API ----------
 const intents = new Map(); // intention -> identifiant d'opération (conservé tant que la réponse du serveur est inconnue)
@@ -47,7 +65,7 @@ async function api(method, path, body, key) {
   try { j = await r.json(); } catch { /* corps vide */ }
   if (key) intents.delete(key); // réponse reçue : l'intention est réglée
   if (!r.ok) {
-    if (r.status === 401 && S.me) { S.me = null; S.st = null; stopPolling(); go('#/'); render(); }
+    if (r.status === 401 && S.me) { S.me = null; wipeLocal(); S.auth = { mode: 'login', error: '', info: 'Session terminée : reconnecte-toi.' }; go('#/'); render(); }
     throw new ApiError(j?.error || 'Erreur', r.status, j?.code);
   }
   return j;
@@ -87,7 +105,7 @@ async function refresh(force = false) {
     const q = !force && S.st ? `?since=${S.st.rev}` : '';
     const r = await api('GET', `/api/family/state${q}`);
     if (r.changed) {
-      S.st = r.state; save('ph_cache', { st: r.state, at: Date.now() });
+      S.st = r.state; save('ph_cache', { st: r.state, at: Date.now(), userId: r.state.me.id });
       if (!S.sheet) render(); else renderSheet(true);
       if (route().a === 'child') loadHistory(true);
     }
@@ -107,13 +125,16 @@ async function boot() {
   try {
     const me = await api('GET', '/api/auth/me');
     S.me = me.user ? me : null;
+    // autre compte (ou aucun) que celui des données locales : on les efface avant tout affichage
+    const cached = load('ph_cache', null);
+    if (!S.me || (cached && cached.userId !== S.me.user.id)) wipeLocal();
   } catch {
-    const c = load('ph_cache', null);
-    if (c?.st) { S.me = { user: c.st.me, membership: { status: 'active', role: c.st.me.role } }; S.st = c.st; render(); return; }
+    const c = readCache();
+    if (c) { S.me = { user: c.st.me, membership: { status: 'active', role: c.st.me.role }, recoveryRemaining: 99 }; S.st = c.st; render(); return; }
     S.me = null; render(); return;
   }
   if (S.me && S.me.membership?.status === 'active') {
-    try { await refresh(true); startPolling(); } catch (e) { if (e.status === 0) { const c = load('ph_cache', null); if (c?.st) S.st = c.st; } }
+    try { await refresh(true); startPolling(); } catch (e) { if (e.status === 0) { const c = readCache(S.me.user.id); if (c) S.st = c.st; } }
   } else if (S.me?.membership?.status === 'pending') {
     pendingTimer = setTimeout(boot, 4000);
   }
@@ -153,14 +174,14 @@ const animOn = () => S.prefs.anim && !matchMedia('(prefers-reduced-motion: reduc
 function celebrate(big) {
   if (!animOn()) return;
   const fx = $('#fx');
-  const emojis = ['⭐', '✨', '🌟', '🎉', '💛'];
-  const n = big ? 22 : 12;
+  const emojis = ['⭐', '✨', '💛'];
+  const n = big ? 9 : 5;
   for (let i = 0; i < n; i++) {
     const s = document.createElement('span');
     s.className = 'fx';
     s.textContent = emojis[i % emojis.length];
-    const a = Math.random() * Math.PI * 2, d = 90 + Math.random() * (big ? 220 : 140);
-    s.style.cssText = `left:${innerWidth / 2}px;top:${innerHeight * 0.45}px;--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d - 60}px;--rot:${Math.random() * 360 - 180}deg`;
+    const a = Math.random() * Math.PI * 2, d = 70 + Math.random() * (big ? 110 : 70);
+    s.style.cssText = `left:${innerWidth / 2}px;top:${innerHeight * 0.45}px;--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d - 40}px;--rot:${Math.random() * 360 - 180}deg`;
     fx.appendChild(s);
     setTimeout(() => s.remove(), 1200);
   }
@@ -171,12 +192,13 @@ function toast(html, { undo, error } = {}) {
   const el = $('#toast');
   el.innerHTML = `<div class="toast ${error ? 'err' : ''}"><span>${html}</span>${undo ? '<button data-act="undo">Annuler</button>' : ''}</div>`;
   S.undo = undo || null;
-  toastTimer = setTimeout(() => { el.innerHTML = ''; S.undo = null; }, error ? 5000 : 9000);
+  toastTimer = setTimeout(() => { el.innerHTML = ''; S.undo = null; }, error ? 6000 : 8000);
 }
 
 // ---------- rendu : coque ----------
 function render() {
   const app = $('#app');
+  if (S.me && S.recovery) { app.innerHTML = recoveryView(); return; }
   if (!S.me) { app.innerHTML = authView(); return; }
   const m = S.me.membership;
   if (!m) { app.innerHTML = onboardView(); return; }
@@ -195,7 +217,8 @@ function render() {
   app.innerHTML = `
     ${S.offline ? '<div class="banner">📡 Hors connexion — dernières données affichées. Modifications désactivées.</div>' : ''}
     ${S.lock.on ? '<div class="lock">🔒 Mode enfant : lecture seule</div>' : ''}
-    <div class="top"><div><h1>Petits Héros</h1><small><span class="dot"></span>${esc(S.st.family.name)}</small></div></div>
+    ${!S.lock.on && S.me.recoveryRemaining === 0 ? '<a class="banner" href="#/family" style="display:block">⚠️ Aucun code de secours : génère-en dans Famille</a>' : ''}
+    <div class="topbar"><div class="top"><div><h1>Petits Héros</h1><small><span class="dot"></span>${esc(S.st.family.name)}</small></div></div></div>
     <main class="wrap">${view}</main>
     <nav class="tabs">
       ${[['children', '🐾', 'Enfants'], ['challenges', '🎯', 'Défis'], ['rewards', '🎁', 'Récompenses'], ['family', '🏠', 'Famille']]
@@ -229,15 +252,30 @@ function authView() {
       <label class="f">Code d’invitation</label><input type="text" name="code" required autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX">
       <button class="btn primary block" style="margin-top:16px">Rejoindre</button></form>
       <p style="text-align:center"><button class="link" data-act="auth" data-mode="login">J’ai déjà un compte</button></p>`,
-    forgot: `<h2>Mot de passe oublié</h2><p class="muted small">Si l’envoi d’e-mails est configuré, tu recevras un lien. Sinon, demande au parent propriétaire de t’envoyer un code de réinitialisation (onglet Famille).</p>
+    forgot: `<h2>Mot de passe oublié</h2><p class="muted small">Si l’envoi d’e-mails est configuré, tu recevras un lien. Sinon, utilise un code de secours, ou demande au parent propriétaire un code de réinitialisation (onglet Famille).</p>
       <form data-form="forgot"><label class="f">E-mail</label><input type="email" name="email" required><button class="btn primary block" style="margin-top:16px">Envoyer le lien</button></form>
-      <p style="text-align:center"><button class="link" data-act="auth" data-mode="reset">J’ai un code</button> · <button class="link" data-act="auth" data-mode="login">Retour</button></p>`,
+      <p style="text-align:center"><button class="link" data-act="auth" data-mode="recover">J’ai un code de secours</button><br><button class="link" data-act="auth" data-mode="reset">J’ai un lien / code du propriétaire</button><br><button class="link" data-act="auth" data-mode="login">Retour</button></p>`,
+    recover: `<h2>Code de secours</h2><p class="muted small">Utilise un des codes reçus à la création du compte. Chaque code ne sert qu’une fois.</p>
+      <form data-form="recover"><label class="f">E-mail</label><input type="email" name="email" required autocomplete="email"><label class="f">Code de secours</label>
+      <input type="text" name="code" required autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX">${pw('Nouveau mot de passe (10 caractères minimum)', 'password', 'new-password')}
+      <button class="btn primary block" style="margin-top:16px">Changer mon mot de passe</button></form>
+      <p style="text-align:center"><button class="link" data-act="auth" data-mode="login">Retour</button></p>`,
     reset: `<h2>Nouveau mot de passe</h2><form data-form="reset"><label class="f">Code ou lien reçu</label>
       <input type="text" name="token" value="${esc(a.token || '')}" required autocomplete="off">${pw('Nouveau mot de passe (10 caractères minimum)', 'password', 'new-password')}
       <button class="btn primary block" style="margin-top:16px">Enregistrer</button></form>
       <p style="text-align:center"><button class="link" data-act="auth" data-mode="login">Retour</button></p>`,
   };
   return `<div class="auth">${logo}<div class="card">${info}${err}${forms[mode] || forms.login}</div></div>`;
+}
+function recoveryView() {
+  return `<div class="auth"><div class="logo"><div class="e">🔐</div><h1>Tes codes de secours</h1></div>
+    <div class="card"><p><b>Note-les maintenant.</b> Ils ne seront plus jamais affichés.</p>
+    <p class="muted small">Si tu oublies ton mot de passe${S.me.mailEnabled ? '' : ' (l’envoi d’e-mails n’est pas configuré)'}, chaque code, utilisable une seule fois, te permet de choisir un nouveau mot de passe. Garde-les hors de ton téléphone (papier, gestionnaire de mots de passe).</p>
+    <div class="recovery">${S.recovery.map((c) => `<code>${esc(c)}</code>`).join('')}</div>
+    <button class="btn block" data-act="copyRecovery">📋 Copier</button>
+    <button class="btn block" style="margin-top:10px" data-act="saveRecovery">💾 Télécharger (.txt)</button>
+    <label class="check" style="margin-top:16px"><input type="checkbox" id="ackRecovery" data-act="ackToggle">J’ai conservé ces codes en lieu sûr</label>
+    <button class="btn primary block" id="ackBtn" data-act="ackRecovery" disabled>Continuer</button></div></div>`;
 }
 function onboardView() {
   const a = S.auth;
@@ -371,6 +409,7 @@ function challengesView() {
   const live = all.filter((c) => !c.completed && !c.expired), past = all.filter((c) => c.completed || c.expired);
   return `${live.length ? live.map(challengeCard).join('') : '<div class="empty"><div class="big">🎯</div><p>Aucun défi en cours.<br>Lance-en un : « Ranger ses jouets 5 jours sur 7 » ?</p></div>'}
     ${past.length ? `<h2 class="sec">Terminés</h2>${past.slice(0, 8).map(challengeCard).join('')}` : ''}
+    <div class="fab-space"></div>
     ${canEdit() ? `<button class="btn primary fab${nm()}" data-act="challengeForm">＋ Nouveau défi</button>` : ''}`;
 }
 
@@ -398,6 +437,7 @@ function rewardsView() {
     }).join('') || '<div class="empty">Aucune récompense pour cet enfant.</div>'}
     ${done.length ? `<h2 class="sec">Déjà réalisées</h2>${done.map((r) => redRow(r, false)).join('')}` : ''}
     <p class="muted small" style="text-align:center;margin-top:20px">💛 Les câlins, les repas et les besoins essentiels ne s’échangent jamais contre des points.</p>
+    <div class="fab-space"></div>
     ${canEdit() ? `<button class="btn primary fab${nm()}" data-act="rewardForm">＋ Récompense</button>` : ''}`;
 }
 
@@ -420,12 +460,13 @@ function familyView() {
   <h2 class="sec">Personnaliser</h2>
   <a class="row" href="#/library"><div class="ic">📚</div><div class="tx">Bibliothèque d’actions<small>Créer, modifier, favoris</small></div>›</a>
   ${owner ? `<button class="row${nm()}" data-act="quickForm"><div class="ic">⚡</div><div class="tx">Valeurs rapides<small>+ ${st.family.quickPlus.join(', ')} · − ${st.family.quickMinus.join(', ')}</small></div>›</button>` : ''}
-  <button class="row" data-act="toggleAnim"><div class="ic">✨</div><div class="tx">Animations<small>${S.prefs.anim ? 'Activées' : 'Désactivées'}</small></div><b>${S.prefs.anim ? 'Oui' : 'Non'}</b></button>
+  <button class="row" data-act="toggleAnim"><div class="ic">✨</div><div class="tx">Animations<small>${matchMedia('(prefers-reduced-motion: reduce)').matches ? 'Réduites (réglage de l’appareil)' : S.prefs.anim ? 'Activées' : 'Désactivées'}</small></div><b>${S.prefs.anim ? 'Oui' : 'Non'}</b></button>
   <button class="row" data-act="lockOn"><div class="ic">🔒</div><div class="tx">Mode enfant<small>Lecture seule, déverrouillage par code</small></div>›</button>
   ${arch.length ? `<h2 class="sec">Profils archivés</h2>${arch.map((c) => `<div class="row" style="cursor:default"><div class="ic">${c.avatar}</div><div class="tx">${esc(c.name)}<small>${c.balance} pts</small></div>
     <button class="btn sm${nm()}" data-act="unarchiveChild" data-id="${c.id}">Restaurer</button></div>`).join('')}` : ''}
   <h2 class="sec">Mes données</h2>
   ${owner ? `<button class="row${nm()}" data-act="exportData"><div class="ic">💾</div><div class="tx">Exporter les données<small>Fichier JSON complet de la famille</small></div>›</button>` : ''}
+  <button class="row${nm()}" data-act="recoveryRegen"><div class="ic">🛟</div><div class="tx">Codes de secours<small>${S.me.recoveryRemaining} restant${S.me.recoveryRemaining > 1 ? 's' : ''} · en générer de nouveaux</small></div>›</button>
   <button class="row${nm()}" data-act="chpw"><div class="ic">🔑</div><div class="tx">Changer mon mot de passe</div>›</button>
   <button class="row" data-act="installHelp"><div class="ic">📲</div><div class="tx">Installer sur l’écran d’accueil</div>›</button>
   <button class="row" data-act="logout"><div class="ic">👋</div><div class="tx">Se déconnecter</div></button>
@@ -447,17 +488,19 @@ function libraryView() {
     ${themes.map((t) => `<div class="theme">${esc(t)}</div>${acts.filter((a) => !a.archived && a.theme === t).map(row).join('')}`).join('')}
     ${arch.length ? `<div class="theme">Archivées</div>${arch.map((a) => `<div class="row" style="cursor:default;opacity:.7"><div class="ic">${a.icon}</div><div class="tx">${esc(a.title)}</div>
       <button class="btn sm${nm()}" data-act="unarchiveAction" data-id="${a.id}">Restaurer</button></div>`).join('')}` : ''}
+    <div class="fab-space"></div>
     <button class="btn primary fab${nm()}" data-act="actionForm">＋ Action</button>`;
 }
 
 // ---------- feuilles (fenêtres modales) ----------
+function closeSheetQuiet() { S.sheet = null; document.body.classList.remove('sheet-open'); $('#sheet').innerHTML = ''; }
 function clearToast() { clearTimeout(toastTimer); $('#toast').innerHTML = ''; S.undo = null; }
-function openSheet(s) { clearToast(); S.sheet = { op: uid(), error: '', ...s }; renderSheet(); }
-function closeSheet() { S.sheet = null; $('#sheet').innerHTML = ''; render(); }
+function openSheet(s) { clearToast(); S.sheet = { op: uid(), error: '', ...s }; document.body.classList.add('sheet-open'); renderSheet(); }
+function closeSheet() { S.sheet = null; document.body.classList.remove('sheet-open'); $('#sheet').innerHTML = ''; render(); }
 function renderSheet(fromPoll) {
   if (fromPoll) return; // on ne touche pas à une saisie en cours ; la vue se met à jour à la fermeture
   const s = S.sheet; if (!s) return;
-  const bodies = { points: pointsSheet, childForm, actionForm, challengeForm, rewardForm, quickForm, invite: inviteSheet, invites: invitesSheet,
+  const bodies = { regen: regenSheet, points: pointsSheet, childForm, actionForm, challengeForm, rewardForm, quickForm, invite: inviteSheet, invites: invitesSheet,
     memberMenu, chpw: chpwSheet, install: installSheet, lockSet: () => pinSheet(true), unlock: () => pinSheet(false), confirm: confirmSheet, info: infoSheet };
   const [title, html] = bodies[s.kind](s);
   $('#sheet').innerHTML = `<div class="backdrop" data-act="closeBackdrop"><div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -587,6 +630,13 @@ function chpwSheet() {
     <label class="f">Nouveau (10 caractères minimum)</label><input type="password" name="password" required minlength="10" autocomplete="new-password">
     <button class="btn primary block${nm()}" style="margin-top:14px">Enregistrer</button></form>`];
 }
+function regenSheet(s) {
+  if (s.codes) return ['Nouveaux codes de secours', `<p><b>Note-les maintenant</b> : les anciens sont invalidés et ceux-ci ne seront plus affichés.</p><div class="recovery">${s.codes.map((c) => `<code>${esc(c)}</code>`).join('')}</div>
+    <button class="btn block" data-act="copyRegen">📋 Copier</button><button class="btn primary block" style="margin-top:10px" data-act="closeSheet">J’ai noté mes codes</button>`];
+  return ['Codes de secours', `<p class="muted">Génère 8 nouveaux codes à usage unique. Les codes actuels (${S.me.recoveryRemaining} restant${S.me.recoveryRemaining > 1 ? 's' : ''}) seront invalidés.</p>
+    <form data-form="regen"><label class="f">Ton mot de passe</label><input type="password" name="password" required autocomplete="current-password">
+    <button class="btn primary block${nm()}" style="margin-top:14px">Générer</button></form>`];
+}
 function installSheet() {
   return ['Installer l’application', `<p><b>iPhone (Safari)</b> : bouton Partager <span style="font-size:1.2rem">⬆️</span> › « Sur l’écran d’accueil ».</p>
     <p><b>Android (Chrome)</b> : menu ⋮ › « Installer l’application » ou « Ajouter à l’écran d’accueil ».</p>
@@ -626,7 +676,19 @@ const A = {
   closeSheet: closeSheet,
   closeBackdrop: (d, el, ev) => { if (ev.target === el) closeSheet(); },
   auth: (d) => { S.auth = { mode: d.mode, error: '', info: '' }; render(); },
-  logout: async () => { try { await api('POST', '/api/auth/logout', {}); } catch { /* déjà déconnecté */ } stopPolling(); S.me = null; S.st = null; save('ph_cache', null); S.auth = { mode: 'login', error: '', info: '' }; go('#/'); render(); },
+  logout: async () => { try { await api('POST', '/api/auth/logout', {}); } catch { /* déjà déconnecté */ } wipeLocal(); S.me = null; S.auth = { mode: 'login', error: '', info: '' }; go('#/'); render(); },
+
+  // codes de secours
+  copyRecovery: async () => { try { await navigator.clipboard.writeText(S.recovery.join('\n')); toast('Codes copiés'); } catch { toast('Copie impossible', { error: true }); } },
+  copyRegen: async () => { try { await navigator.clipboard.writeText(S.sheet.codes.join('\n')); toast('Codes copiés'); } catch { toast('Copie impossible', { error: true }); } },
+  saveRecovery: () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([`Petits Héros — codes de secours (usage unique)\n${S.me.user.email}\n\n${S.recovery.join('\n')}\n`], { type: 'text/plain' }));
+    a.download = 'petits-heros-codes-secours.txt'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  },
+  ackToggle: () => { $('#ackBtn').disabled = !$('#ackRecovery').checked; },
+  ackRecovery: async () => { if (!$('#ackRecovery').checked) return; S.recovery = null; await boot(); },
+  recoveryRegen: () => openSheet({ kind: 'regen' }),
 
   // points
   points: (d) => { const plus = d.sign === '+'; openSheet({ kind: 'points', childId: d.id, sign: d.sign, tab: plus ? 'free' : 'behavior', value: null, reason: '', actionId: null }); },
@@ -639,7 +701,7 @@ const A = {
     const c = kid(s.childId);
     const body = { value: s.value, reason: s.reason || undefined, actionId: s.actionId || undefined, bonus: s.tab === 'bonus' || undefined };
     const r = await write('POST', `/api/children/${s.childId}/points`, body);
-    S.sheet = null; $('#sheet').innerHTML = '';
+    closeSheetQuiet();
     const gain = r.value > 0;
     if (gain) S.pulse = c.id;
     render();
@@ -653,7 +715,7 @@ const A = {
   childForm: (d) => { const c = d.id ? kid(d.id) : null; openSheet({ kind: 'childForm', id: c?.id, name: c?.name, age: c?.age, avatar: c?.avatar || AVATARS[Math.floor(Math.random() * AVATARS.length)], color: c?.color || COLORS[activeKids().length % COLORS.length] }); },
   pick: (d, el) => { S.sheet[d.field] = d.val; el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el)); },
   archiveChild: (d) => ask('Archiver ce profil ?', 'Le profil disparaît de l’écran principal. L’historique et les points sont conservés ; tu pourras le restaurer.', 'Archiver', () => run(async () => {
-    await write('POST', `/api/children/${d.id}/archive`, {}, `a:${d.id}`); S.sheet = null; $('#sheet').innerHTML = ''; go('#/children'); render(); })),
+    await write('POST', `/api/children/${d.id}/archive`, {}, `a:${d.id}`); closeSheetQuiet(); go('#/children'); render(); })),
   unarchiveChild: (d) => run(async () => { await write('POST', `/api/children/${d.id}/unarchive`, {}, `u:${d.id}`); render(); }),
   histFilter: (d) => { S.hist.type = d.t; loadHistory(true); },
   histMore: () => loadHistory(false, true),
@@ -686,7 +748,7 @@ const A = {
     const c = kid(S.rewardChild), r = S.st.rewards.find((x) => x.id === d.id);
     ask(`${r.icon} ${r.title}`, `Échanger ${r.cost} points de ${c.name} contre cette récompense ? Elle passera « à réaliser ».`, `Échanger ${r.cost} pts`, () => run(async () => {
       const res = await api('POST', `/api/rewards/${r.id}/redeem`, { childId: c.id }, S.sheet.op);
-      await refresh(true); S.sheet = null; $('#sheet').innerHTML = ''; render(); celebrate(false);
+      await refresh(true); closeSheetQuiet(); render(); celebrate(false);
       toast(`<b>${esc(c.name)}</b> : ${r.icon} à réaliser · ${pts(res.balance)} restants`, { undo: () => undoPost(`/api/redemptions/${res.redemptionId}/cancel`) });
     }), false);
   },
@@ -735,15 +797,18 @@ async function undoPost(path) {
 const csvInts = (v) => v.split(/[,;\s]+/).filter(Boolean).map(Number);
 const F = {
   login: async (f) => { await api('POST', '/api/auth/login', { email: f.email.value, password: f.password.value }); await boot(); },
-  register: async (f) => { await api('POST', '/api/auth/register', { name: f.name.value, email: f.email.value, password: f.password.value, familyName: f.familyName.value }); await boot(); },
+  register: async (f) => { const r = await api('POST', '/api/auth/register', { name: f.name.value, email: f.email.value, password: f.password.value, familyName: f.familyName.value }); S.recovery = r.recoveryCodes; await boot(); },
   join: async (f) => {
-    await api('POST', '/api/auth/register', { name: f.name.value, email: f.email.value, password: f.password.value });
+    const r = await api('POST', '/api/auth/register', { name: f.name.value, email: f.email.value, password: f.password.value });
+    S.recovery = r.recoveryCodes;
     try { await api('POST', '/api/family/join', { code: f.code.value }); } catch (e) { S.auth.error = `${errMsg(e)} Tu peux réessayer ci-dessous.`; }
     await boot();
   },
   newfamily: async (f) => { await api('POST', '/api/auth/family', { familyName: f.familyName.value }); await boot(); },
   joincode: async (f) => { await api('POST', '/api/family/join', { code: f.code.value }); S.auth.error = ''; await boot(); },
-  forgot: async (f) => { const r = await api('POST', '/api/auth/forgot', { email: f.email.value }); S.auth = { mode: 'forgot', error: '', info: r.mailEnabled ? 'Si ce compte existe, un e-mail vient d’être envoyé.' : 'L’envoi d’e-mails n’est pas configuré. Demande un code au parent propriétaire (onglet Famille › ⋯).' }; render(); },
+  forgot: async (f) => { const r = await api('POST', '/api/auth/forgot', { email: f.email.value }); S.auth = { mode: 'forgot', error: '', info: r.mailEnabled ? 'Si ce compte existe, un e-mail vient d’être envoyé.' : 'L’envoi d’e-mails n’est pas configuré. Utilise un code de secours, ou demande un code au parent propriétaire (onglet Famille › ⋯).' }; render(); },
+  recover: async (f) => { await api('POST', '/api/auth/recover', { email: f.email.value, code: f.code.value, password: f.password.value }); S.auth = { mode: 'login', error: '', info: 'Mot de passe modifié. Connecte-toi (tes autres appareils ont été déconnectés).' }; render(); },
+  regen: async (f) => { const r = await api('POST', '/api/auth/recovery-codes', { password: f.password.value }); S.sheet.codes = r.recoveryCodes; S.me.recoveryRemaining = r.recoveryCodes.length; renderSheet(); },
   reset: async (f) => { await api('POST', '/api/auth/reset', { token: f.token.value, password: f.password.value }); S.auth = { mode: 'login', error: '', info: 'Mot de passe modifié. Connecte-toi.' }; go('#/'); render(); },
   child: async (f) => {
     const s = S.sheet, body = { name: f.name.value, age: f.age.value === '' ? null : Number(f.age.value), avatar: s.avatar, color: s.color };
@@ -764,7 +829,7 @@ const F = {
   },
   quick: async (f) => { await write('PATCH', '/api/family/settings', { quickPlus: csvInts(f.plus.value), quickMinus: csvInts(f.minus.value) }); closeSheet(); },
   chpw: async (f) => { await api('POST', '/api/auth/change-password', { current: f.current.value, password: f.password.value }); closeSheet(); toast('Mot de passe modifié ✓'); },
-  lockSet: async (f) => { if (!/^\d{4}$/.test(f.pin.value)) throw new Error('4 chiffres'); const salt = uid(); S.lock = { on: true, salt, hash: await sha(salt + f.pin.value) }; save('ph_lock', S.lock); S.sheet = null; $('#sheet').innerHTML = ''; go('#/children'); render(); },
+  lockSet: async (f) => { if (!/^\d{4}$/.test(f.pin.value)) throw new Error('4 chiffres'); const salt = uid(); S.lock = { on: true, salt, hash: await sha(salt + f.pin.value) }; save('ph_lock', S.lock); closeSheetQuiet(); go('#/children'); render(); },
   unlock: async (f) => { if ((await sha(S.lock.salt + f.pin.value)) !== S.lock.hash) throw new Error('Code incorrect'); S.lock = { on: false }; save('ph_lock', S.lock); closeSheet(); },
 };
 
@@ -780,7 +845,7 @@ document.addEventListener('submit', (e) => {
   e.preventDefault();
   const fn = F[f.dataset.form];
   if (!fn || S.busy) return;
-  const auth = !S.sheet && ['login', 'register', 'join', 'forgot', 'reset', 'newfamily', 'joincode'].includes(f.dataset.form);
+  const auth = !S.sheet && ['login', 'register', 'join', 'forgot', 'reset', 'recover', 'newfamily', 'joincode'].includes(f.dataset.form);
   S.busy = true;
   fn(f).catch((err) => { if (S.sheet) sheetErr(errMsg(err)); else if (auth) { S.auth.error = errMsg(err); render(); } else toast(esc(errMsg(err)), { error: true }); })
     .finally(() => { S.busy = false; });
@@ -796,6 +861,16 @@ window.addEventListener('hashchange', () => { clearToast(); S.hist = null; if (!
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.installEvt = e; });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
 
+// clavier mobile : la fenêtre suit la zone réellement visible et le champ actif reste visible
+if (window.visualViewport) {
+  const vv = () => document.documentElement.style.setProperty('--vvh', `${Math.round(visualViewport.height)}px`);
+  visualViewport.addEventListener('resize', vv); vv();
+}
+document.addEventListener('focusin', (e) => {
+  if (S.sheet && e.target.matches('input, select, textarea')) setTimeout(() => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+});
+// retour arrière après déconnexion : jamais d'affichage depuis le cache de navigation
+window.addEventListener('pageshow', (e) => { if (e.persisted) boot(); });
 document.body.classList.toggle('noanim', !S.prefs.anim);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 boot();

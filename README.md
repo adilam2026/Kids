@@ -48,13 +48,35 @@ Variables : voir `.env.example`.
 ## Tests
 
 ```bash
-export DATABASE_URL=postgres://postgres@localhost:5432/kids_test   # base JETABLE : le schéma est réinitialisé !
-npm test                 # 20 tests API sur PostgreSQL réel (parcours, concurrence, isolation…)
+# Base de test DÉDIÉE, jamais DATABASE_URL (les tests ne la lisent pas) :
+createdb kids_test
+export TEST_DATABASE_URL=postgres://postgres@localhost:5432/kids_test
+npm test                 # 25 tests : API sur PostgreSQL réel + garde-fous
 npm run redeploy-test    # processus réel arrêté puis relancé : données conservées
-npm run e2e              # 2 « téléphones » Chromium (Playwright requis) : tout le parcours dans l’interface
+npm run e2e              # « téléphones » Chromium (Playwright requis) : interface, mobile, PWA, sécurité locale
 ```
 
-⚠️ Ces commandes **suppriment le schéma `public`** de la base ciblée : n’utilisez jamais la base de production.
+**Garde-fous des tests destructifs** (`test/guard.js`, testés dans `test/guard.test.js`) : la réinitialisation du schéma est **refusée** si `NODE_ENV=production`, si l'hôte n'est pas local (sauf `PH_TEST_ALLOW_REMOTE=1`) ou est Railway, si le nom de base ne se termine pas par `_test`, si c'est la même base que `DATABASE_URL`, ou si la base contient des tables sans le marqueur `_ph_test_marker` posé par un précédent reset de test (une base `*_test` « précieuse » n'est donc jamais effacée).
+
+## Données locales sur l'appareil
+
+| Situation | Ce qui reste consultable |
+|---|---|
+| Connecté, hors ligne | Dernier état reçu (lecture seule, bandeau « Hors connexion », boutons inertes), **7 jours maximum** |
+| Déconnexion, session révoquée (401), connexion d'un autre compte | **Rien** : copie locale, historique et état mémoire effacés ; retour arrière (bfcache) → rechargement |
+| Membre **retiré** alors que son téléphone est **en ligne** | Sessions supprimées côté serveur : au plus tard au prochain échange (≤ 3 s, ou à la réouverture) → écran de connexion + copie locale effacée |
+| Membre retiré alors que son téléphone est **hors ligne** | Il peut **encore lire** la copie locale (jamais modifier) jusqu'à la reconnexion ou 7 jours ; le serveur lui refuse tout dès qu'il se reconnecte |
+| Service worker | Ne met en cache que la coquille (`/`, JS, CSS, icônes) ; **jamais** `/api/*` (`Cache-Control: no-store` côté serveur) |
+
+## Vérification mobile
+
+| Vérifié par test automatique (Chromium émulé mobile, 390×780 et 320×568) | À vérifier sur appareils réels |
+|---|---|
+| Manifeste + icônes, service worker actif, **installabilité Chromium sans erreur** | Installation réelle Android (Chrome) et iPhone (Safari › Sur l'écran d'accueil), icône, plein écran, barre d'état |
+| Aucun débordement horizontal, cibles ≥ 44 px, texte ≥ 13,5 px, 4 onglets | Rendu réel des polices système, encoche / barre d'accueil iPhone (`safe-area`) |
+| Fenêtres : défilement interne, fond figé, bouton Confirmer atteignable | **Vrai clavier** iOS/Android (ici : viewport réduit simulé + `visualViewport`) |
+| Notifications contenues dans l'en-tête fixe, confettis ≤ 5, `prefers-reduced-motion` respecté | Réglage « réduire les animations » réel d'iOS/Android |
+| Session persistante, reconnexion, hors ligne ↔ en ligne | Reprise de l'app installée après longue mise en veille, notifications système (non utilisées) |
 
 ## Déploiement, sauvegardes, coûts
 

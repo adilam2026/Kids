@@ -1,22 +1,15 @@
 import { Router } from 'express';
-import crypto from 'node:crypto';
 import { query, withTx, getPool } from '../db.js';
 import { HttpError, wrap, str, hit, uuid, intList } from '../util.js';
-import { requireUser, requireParent, requireOwner, sha256, randomToken } from '../auth.js';
+import { requireUser, requireParent, requireOwner, sha256, randomToken, randomCode, normalizeCode, prettyCode } from '../auth.js';
 import { loadState } from '../state.js';
 import { mutate } from './helpers.js';
 
 export const familyRouter = Router();
-const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans I, O, 0, 1
 const INVITE_HOURS = 48;
-
-function newCode() {
-  let s = '';
-  for (let i = 0; i < 12; i++) s += ALPHABET[crypto.randomInt(ALPHABET.length)];
-  return s;
-}
-const normalize = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-const pretty = (s) => s.match(/.{4}/g).join('-');
+const newCode = () => randomCode(12);
+const normalize = normalizeCode;
+const pretty = prettyCode;
 
 // ---- Rejoindre avec un code : crée seulement une demande, aucun accès aux données ----
 familyRouter.post('/join', requireUser, wrap(async (req, res) => {

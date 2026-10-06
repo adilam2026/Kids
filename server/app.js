@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
@@ -28,7 +29,15 @@ export function createApp() {
     next();
   });
 
-  app.get('/healthz', wrap(async (_req, res) => { await query('SELECT 1'); res.json({ ok: true }); }));
+  // Santé : base joignable ET toutes les migrations du code appliquées (sinon 503 → Railway ne bascule pas le trafic).
+  app.get('/healthz', async (_req, res) => {
+    try {
+      const applied = (await query('SELECT count(*) AS n FROM schema_migrations')).rows[0].n;
+      const expected = fs.readdirSync(path.join(pub, '..', 'migrations')).filter((f) => f.endsWith('.sql')).length;
+      if (applied < expected) return res.status(503).json({ ok: false, db: true, migrations: `${applied}/${expected}` });
+      res.set('Cache-Control', 'no-store').json({ ok: true, db: true, migrations: applied });
+    } catch { res.status(503).json({ ok: false, db: false }); }
+  });
 
   app.use('/api', express.json({ limit: '50kb' }));
   // Protection CSRF : cookie SameSite=Lax + Origin vérifié sur les écritures + JSON obligatoire

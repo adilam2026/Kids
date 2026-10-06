@@ -27,6 +27,12 @@ export function checkPasswordStrength(pw) {
   if (pw.length > 200) throw new HttpError(400, 'Mot de passe trop long');
 }
 
+// Codes lisibles (sans I, O, 0, 1) : invitations et codes de secours
+const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function randomCode(len = 12) { let s = ''; for (let i = 0; i < len; i++) s += ALPHABET[crypto.randomInt(ALPHABET.length)]; return s; }
+export const normalizeCode = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+export const prettyCode = (s) => s.match(/.{4}/g).join('-');
+
 export const COOKIE = 'ph_session';
 const SESSION_DAYS = 90;
 

@@ -3,6 +3,8 @@ import { migrate } from './migrate.js';
 import { config } from './config.js';
 import { query, closePool } from './db.js';
 
+if (!config.databaseUrl) { console.error('DATABASE_URL manquant : référencez le service PostgreSQL (voir docs/DEPLOY.md).'); process.exit(1); }
+if (config.isProd && !config.appUrl) console.warn('APP_URL non défini : les liens des e-mails de réinitialisation seront incomplets.');
 await migrate();
 const app = createApp();
 const server = app.listen(config.port, '0.0.0.0', () => console.log(`Petits Héros écoute sur :${config.port}`));
