@@ -1,0 +1,59 @@
+name: Android signing bootstrap
+
+# À lancer UNE SEULE FOIS. Génère la clé de signature définitive sur le runner GitHub, l'enregistre dans les
+# secrets Actions du dépôt et produit une sauvegarde CHIFFRÉE. Aucune valeur secrète n'est affichée.
+# Prérequis (créés par le propriétaire dans l'interface GitHub, voir docs/ANDROID.md) :
+#   - secret BOOTSTRAP_TOKEN : jeton fine-grained limité à CE dépôt, permission « Secrets : Read and write » (à révoquer après)
+#   - secret ANDROID_BACKUP_PASSPHRASE : phrase secrète d'au moins 20 caractères, choisie par le propriétaire
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Tapez CREER pour créer la clé de signature définitive (refusé si une clé existe déjà)"
+        required: true
+
+permissions:
+  contents: read   # ce workflow n'écrit rien dans le dépôt ; l'écriture des secrets utilise BOOTSTRAP_TOKEN
+
+jobs:
+  bootstrap:
+    name: Créer la clé de signature
+    if: inputs.confirm == 'CREER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - name: Vérifier les prérequis (aucune valeur affichée)
+        env:
+          T: ${{ secrets.BOOTSTRAP_TOKEN }}
+          P: ${{ secrets.ANDROID_BACKUP_PASSPHRASE }}
+        run: |
+          [ -n "$T" ] || { echo "::error title=Secret BOOTSTRAP_TOKEN manquant::Créez le jeton fine-grained (dépôt Kids uniquement, permission Secrets = Read and write) puis le secret BOOTSTRAP_TOKEN (docs/ANDROID.md, étape A)."; exit 1; }
+          [ -n "$P" ] || { echo "::error title=Secret ANDROID_BACKUP_PASSPHRASE manquant::Créez le secret ANDROID_BACKUP_PASSPHRASE : une phrase de 20 caractères minimum que vous noterez dans votre gestionnaire de mots de passe (docs/ANDROID.md, étape B)."; exit 1; }
+          [ "${#P}" -ge 20 ] || { echo "::error title=Phrase trop courte::ANDROID_BACKUP_PASSPHRASE doit faire au moins 20 caractères."; exit 1; }
+      - name: Générer la clé, l'enregistrer dans les secrets, chiffrer la sauvegarde
+        env:
+          GH_TOKEN: ${{ secrets.BOOTSTRAP_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          BACKUP_PASSPHRASE: ${{ secrets.ANDROID_BACKUP_PASSPHRASE }}
+        run: sh android/scripts/bootstrap-signing.sh "$RUNNER_TEMP/signing"
+      - name: Sauvegarde chiffrée (à télécharger dans les 24 h, puis elle est supprimée)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sauvegarde-cle-signature-CHIFFREE
+          path: ${{ runner.temp }}/signing/backup/
+          retention-days: 1
+      - name: Nettoyage
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/signing"
+      - name: Résumé
+        run: |
+          {
+            echo "### Clé de signature créée"
+            echo "Enregistrée dans les secrets du dépôt (5 secrets). **Prochaines étapes :**"
+            echo "1. Télécharger l'artefact **sauvegarde-cle-signature-CHIFFREE** ci-dessous (disponible 24 h) et le ranger avec la phrase secrète ANDROID_BACKUP_PASSPHRASE dans deux endroits distincts."
+            echo "2. **Révoquer le jeton BOOTSTRAP_TOKEN** (Settings > Developer settings > Fine-grained tokens) et supprimer le secret BOOTSTRAP_TOKEN."
+            echo "3. Lancer le workflow « Android APK » en mode release."
+          } >> "$GITHUB_STEP_SUMMARY"

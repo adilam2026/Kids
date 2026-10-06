@@ -15,8 +15,13 @@ on:
       api_base:
         description: "URL HTTPS du serveur Railway embarquée dans l'application"
         default: 'https://petits-heros-production.up.railway.app'
+      mode:
+        description: "release = APK signé avec la clé définitive + Release ; dry-run = essai à blanc avec une clé jetable (rien n'est publié)"
+        type: choice
+        options: [release, dry-run]
+        default: release
       publish:
-        description: 'Publier une Release GitHub avec l’APK signé'
+        description: 'Publier une Release GitHub avec l’APK signé (mode release)'
         type: boolean
         default: true
 
@@ -52,9 +57,57 @@ jobs:
           echo "### Compilation OK" >> "$GITHUB_STEP_SUMMARY"
           echo "APK de contrôle signé avec une clé de débogage : **ne pas l'installer** (il ne pourrait pas être remplacé par la version signée)." >> "$GITHUB_STEP_SUMMARY"
 
+  # Essai à blanc : même chaîne que la release (build, signature, vérification avec les VRAIS apksigner/aapt2)
+  # mais avec une clé JETABLE créée sur le runner et détruite. Rien n'est publié ni conservé.
+  dry-run:
+    name: Essai à blanc (clé jetable, rien de publié)
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Numéro de version
+        run: |
+          echo "VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$(( ${{ github.run_number }} + ${{ vars.ANDROID_VERSION_CODE_OFFSET || 0 }} ))" >> "$GITHUB_ENV"
+      - run: npm run android:web
+      - name: Clé jetable
+        run: |
+          SHA="$(sh android/scripts/ci-make-keystore.sh "$RUNNER_TEMP/throwaway")"
+          echo "THROWAWAY_SHA256=$SHA" >> "$GITHUB_ENV"
+      - name: Compiler et signer (assembleRelease)
+        working-directory: android
+        run: |
+          set -a; . "$RUNNER_TEMP/throwaway/signing.env"; set +a
+          export PH_KEYSTORE_FILE="$RUNNER_TEMP/throwaway/release.p12" PH_KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" PH_KEY_ALIAS="$ANDROID_KEY_ALIAS" PH_KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
+          ./gradlew --no-daemon assembleRelease
+      - name: Vérifier avec apksigner et aapt2 (vrais outils Android)
+        env:
+          EXPECTED_CERT_SHA256: ${{ env.THROWAWAY_SHA256 }}
+          EXPECTED_VERSION_CODE: ${{ env.VERSION_CODE }}
+        run: |
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          sh android/scripts/verify-apk.sh "$APK"
+          echo "--- contre-épreuve : une AUTRE empreinte attendue doit être refusée"
+          if EXPECTED_CERT_SHA256=0000000000000000000000000000000000000000000000000000000000000000 sh android/scripts/verify-apk.sh "$APK" >/dev/null 2>&1; then echo "ERREUR : une mauvaise empreinte a été acceptée"; exit 1; else echo "refusée comme prévu"; fi
+          AS=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$AS" verify --verbose --print-certs "$APK" | grep -E "Verified using|certificate DN|Number of signers"
+          AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|application-label):"
+          ls -l "$APK"
+      - name: Détruire la clé jetable
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/throwaway"
+
   release:
     name: APK signé
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/android-v')
+    if: (github.event_name == 'workflow_dispatch' && inputs.mode == 'release') || startsWith(github.ref, 'refs/tags/android-v')
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
