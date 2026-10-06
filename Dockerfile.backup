@@ -1,0 +1,7 @@
+# Image du service de sauvegarde quotidienne (service Railway séparé, avec « Cron Schedule »).
+FROM postgres:16-alpine
+RUN apk add --no-cache aws-cli
+WORKDIR /app
+COPY scripts/backup.sh /app/backup.sh
+RUN chmod +x /app/backup.sh
+CMD ["/app/backup.sh"]

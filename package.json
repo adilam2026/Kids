@@ -1,0 +1,23 @@
+{
+  "name": "petits-heros",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Petits Héros — points, défis et récompenses pour la famille (PWA + API + PostgreSQL)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "migrate": "node server/migrate.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "icons": "node scripts/make-icons.mjs",
+    "e2e": "node test/e2e.mjs",
+    "redeploy-test": "node test/redeploy.mjs",
+    "backup": "sh scripts/backup.sh"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.13.0"
+  }
+}
