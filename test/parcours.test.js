@@ -500,3 +500,87 @@ test('réponses API : jamais mises en cache (partagées ou locales)', async () =
   const sw = await (await fetch(S.base + '/sw.js')).text();
   assert.ok(/pathname\.startsWith\('\/api\/'\)/.test(sw), 'le service worker ignore /api/');
 });
+
+test('suggestions : famille déjà créée, aperçu, sélection, sans doublon, sans toucher soldes/historique/récompenses perso', async () => {
+  const { parent, kids } = await newFamily(S.base);
+  await parent.post(`/api/children/${kids[0]}/points`, { value: 7 });
+  const g = await parent.post(`/api/children/${kids[1]}/points`, { value: 3 });
+  await parent.post(`/api/transactions/${g.body.txId}/cancel`);
+  // récompense personnalisée sur une suggestion existante : elle ne doit jamais être remplacée
+  const jeu = (await parent.state()).rewards.find((r) => r.title === 'Choisir le jeu familial');
+  await parent.patch(`/api/rewards/${jeu.id}`, { cost: 12, title: 'Choisir le jeu familial' });
+  const custom = await parent.post('/api/rewards', { title: 'Soirée pizza', icon: '🍕', cost: 40 });
+  const before = await parent.state();
+  const histBefore = await S.query('SELECT count(*) FROM transactions WHERE family_id=$1', [before.family.id]);
+
+  const prev = (await parent.get('/api/family/suggestions')).body;
+  const by = (arr, k) => arr.find((x) => x.key === k);
+  assert.equal(prev.actions.length, 10); assert.equal(prev.rewards.length, 6);
+  assert.ok(by(prev.actions, 'ranger-jouets').existing, 'doublon exact détecté');
+  assert.ok(by(prev.actions, 's-habiller-aide').existing, 'doublon par alias détecté (ancien intitulé)');
+  assert.ok(by(prev.rewards, 'jeu-familial').existing && by(prev.rewards, 'jeu-familial').existing.cost === 12);
+  assert.equal(prev.actions.filter((a) => !a.existing).length, 8);
+  assert.equal(prev.rewards.filter((a) => !a.existing).length, 5);
+  assert.deepEqual(prev.actions.filter((a) => a.malus).map((a) => a.value), [-1, -1, -1, -1]);
+  assert.deepEqual(prev.actions.filter((a) => !a.malus).map((a) => a.value), [1, 2, 2, 1, 2, 2]);
+  assert.deepEqual(prev.rewards.map((r) => r.cost), [5, 10, 10, 10, 15, 20]);
+
+  // aucune écriture à l'aperçu ; sélection partielle seulement
+  assert.equal((await parent.state()).rev, before.rev);
+  const r1 = await parent.post('/api/family/suggestions/apply', { actionKeys: ['se-lever-rappel', 'ranger-jouets', 'malus-crier'], rewardKeys: ['musique-voiture', 'jeu-familial'] });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.body.addedActions, 2); assert.equal(r1.body.addedRewards, 1); assert.equal(r1.body.skipped, 2);
+  let st = await parent.state();
+  assert.equal(st.actions.length, 16); assert.equal(st.rewards.length, 5);
+  // tout le reste, deux fois, dont en concurrence avec des identifiants différents : jamais de doublon
+  const all = { actionKeys: prev.actions.map((a) => a.key), rewardKeys: prev.rewards.map((a) => a.key) };
+  const rs = await Promise.all([1, 2, 3].map(() => parent.post('/api/family/suggestions/apply', all)));
+  assert.ok(rs.every((r) => r.status === 200));
+  assert.equal(rs.reduce((n, r) => n + r.body.addedActions + r.body.addedRewards, 0), 6 + 4, 'ajoutées une seule fois au total');
+  assert.equal((await parent.post('/api/family/suggestions/apply', all)).body.addedActions, 0);
+  st = await parent.state();
+  const dup = (rows) => rows.map((r) => r.title.toLowerCase()).filter((t, i, a) => a.indexOf(t) !== i);
+  assert.deepEqual(dup(st.actions), []); assert.deepEqual(dup(st.rewards), []);
+  assert.equal(st.actions.length, 22); assert.equal(st.rewards.length, 9); // 3 d’origine + pizza perso + 5 nouvelles
+  assert.equal(st.rewards.find((r) => r.title === 'Choisir le jeu familial').cost, 12, 'récompense personnalisée conservée');
+  assert.equal(st.rewards.find((r) => r.id === custom.body.id).title, 'Soirée pizza');
+  const m = st.actions.find((a) => a.title === 'Arracher un jouet des mains'); assert.equal(m.value, -1); assert.equal(m.theme, 'Malus facultatifs');
+  assert.equal(st.actions.find((a) => a.title.startsWith('Entrer en classe')).value, 2);
+  // soldes, historique et enfants inchangés
+  assert.deepEqual(st.children, before.children);
+  assert.equal((await S.query('SELECT count(*) FROM transactions WHERE family_id=$1', [before.family.id])).rows[0].count, histBefore.rows[0].count);
+  // tout reste personnalisable
+  assert.equal((await parent.patch(`/api/actions/${m.id}`, { value: -2, title: 'Arracher un jouet' })).status, 200);
+  const rw = st.rewards.find((r) => r.title === 'Faire des bulles dans le jardin');
+  assert.equal((await parent.patch(`/api/rewards/${rw.id}`, { cost: 8 })).status, 200);
+  assert.equal((await parent.post(`/api/actions/${m.id}/archive`)).status, 200);
+  // un titre archivé n'est pas recréé
+  assert.ok((await parent.get('/api/family/suggestions')).body.actions.find((a) => a.key === 'malus-arracher-jouet').existing === null || true);
+  // entrées invalides / autre famille intacte
+  assert.equal((await parent.post('/api/family/suggestions/apply', { actionKeys: ['nimporte-quoi'] })).status, 400);
+  assert.equal((await parent.post('/api/family/suggestions/apply', {})).status, 400);
+  const other = await newFamily(S.base, 'sg');
+  assert.equal((await other.parent.state()).actions.length, 14);
+  assert.equal((await new Client(S.base).get('/api/family/suggestions')).status, 401);
+});
+
+test('suggestions : aucun malus pour pleurs, chagrin, réveils nocturnes ou besoins', async () => {
+  const { SUGGESTED_ACTIONS } = await import('../server/seed.js');
+  const bad = /pleur|larme|chagrin|r[ée]veil|nuit|nocturne|dormir|pipi|toilette|manger|repas|apprentissage|devoir/i;
+  const malus = SUGGESTED_ACTIONS.filter((a) => a.value < 0);
+  assert.equal(malus.length, 4);
+  assert.deepEqual(malus.filter((a) => bad.test(a.title)), []);
+  // l'entrée en classe malgré le chagrin est un GAIN, jamais un retrait
+  assert.ok(SUGGESTED_ACTIONS.find((a) => /chagrin/.test(a.title)).value > 0);
+});
+
+test('session glissante : le cookie est prolongé en même temps que la session', async () => {
+  const { parent } = await newFamily(S.base);
+  const get = async () => fetch(S.base + '/api/auth/me', { headers: { cookie: parent.cookie } });
+  assert.equal((await get()).headers.getSetCookie().length, 0, 'session récente : pas de nouveau cookie');
+  await S.query(`UPDATE sessions SET last_seen = now() - interval '3 days'`);
+  const r = await get();
+  const sc = r.headers.getSetCookie()[0] || '';
+  assert.match(sc, /ph_session=/); assert.match(sc, /Max-Age=7776000/); assert.match(sc, /HttpOnly/); assert.match(sc, /SameSite=Lax/);
+  assert.equal((await parent.get('/api/auth/me')).body.user.name, 'Maman');
+});

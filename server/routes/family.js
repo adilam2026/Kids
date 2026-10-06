@@ -4,6 +4,7 @@ import { HttpError, wrap, str, hit, uuid, intList } from '../util.js';
 import { requireUser, requireParent, requireOwner, sha256, randomToken, randomCode, normalizeCode, prettyCode } from '../auth.js';
 import { loadState } from '../state.js';
 import { mutate } from './helpers.js';
+import { suggestionStatus, SUGGESTED_ACTIONS, SUGGESTED_REWARDS } from '../seed.js';
 
 export const familyRouter = Router();
 const INVITE_HOURS = 48;
@@ -64,6 +65,35 @@ familyRouter.patch('/settings', requireOwner, mutate(async (req, c, fam) => {
   if (b.name !== undefined) await c.query('UPDATE families SET name=$2 WHERE id=$1', [fam, str(b.name, 'Nom', { required: true, max: 60 })]);
   if (b.quickPlus !== undefined) await c.query('UPDATE families SET quick_plus=$2 WHERE id=$1', [fam, intList(b.quickPlus, 'Valeurs +')]);
   if (b.quickMinus !== undefined) await c.query('UPDATE families SET quick_minus=$2 WHERE id=$1', [fam, intList(b.quickMinus, 'Valeurs −')]);
+}));
+
+// ---- Suggestions : aperçu puis ajout choisi, jamais de doublon, rien d'existant modifié ----
+familyRouter.get('/suggestions', wrap(async (req, res) => {
+  const s = await suggestionStatus({ query }, req.member.familyId);
+  res.json({ ok: true, actions: s.actions, rewards: s.rewards });
+}));
+familyRouter.post('/suggestions/apply', mutate(async (req, c, fam) => {
+  const b = req.body || {};
+  const pick = (v, catalog, label) => {
+    if (v == null) return [];
+    if (!Array.isArray(v) || v.length > 50) throw new HttpError(400, `Sélection « ${label} » invalide`);
+    const keys = [...new Set(v)];
+    if (keys.some((k) => !catalog.some((s) => s.key === k))) throw new HttpError(400, `Suggestion « ${label} » inconnue`);
+    return keys;
+  };
+  const aKeys = pick(b.actionKeys, SUGGESTED_ACTIONS, 'actions'), rKeys = pick(b.rewardKeys, SUGGESTED_REWARDS, 'récompenses');
+  if (!aKeys.length && !rKeys.length) throw new HttpError(400, 'Sélectionne au moins une suggestion');
+  const st = await suggestionStatus(c, fam); // recalculé sous le verrou de la famille : pas de doublon, même en concurrence
+  let addedA = 0, addedR = 0;
+  for (const s of st.actions.filter((x) => aKeys.includes(x.key) && !x.existing)) {
+    await c.query(`INSERT INTO actions(family_id, theme, title, icon, value, sort) VALUES ($1,$2,$3,$4,$5,(SELECT COALESCE(max(sort),0)+1 FROM actions WHERE family_id=$1))`, [fam, s.theme, s.title, s.icon, s.value]);
+    addedA++;
+  }
+  for (const s of st.rewards.filter((x) => rKeys.includes(x.key) && !x.existing)) {
+    await c.query('INSERT INTO rewards(family_id, title, icon, cost) VALUES ($1,$2,$3,$4)', [fam, s.title, s.icon, s.cost]);
+    addedR++;
+  }
+  return { addedActions: addedA, addedRewards: addedR, skipped: aKeys.length + rKeys.length - addedA - addedR };
 }));
 
 // ---- Invitations (propriétaire) ----

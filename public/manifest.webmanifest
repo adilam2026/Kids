@@ -1,8 +1,11 @@
 {
+  "id": "/",
   "name": "Petits Héros",
   "short_name": "Petits Héros",
   "description": "Points, défis et récompenses pour la famille",
   "lang": "fr",
+  "dir": "ltr",
+  "categories": ["lifestyle", "kids", "education"],
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

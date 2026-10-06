@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { query } from './db.js';
+import { config } from './config.js';
 import { HttpError, wrap } from './util.js';
 
 const scrypt = promisify(crypto.scrypt);
@@ -60,7 +61,7 @@ export async function createSession(userId) {
 }
 
 // Charge l'utilisateur et son appartenance familiale (jamais lue depuis le client).
-export const loadAuth = wrap(async (req, _res, next) => {
+export const loadAuth = wrap(async (req, res, next) => {
   const token = parseCookies(req.headers.cookie)[COOKIE];
   if (token) {
     const { rows } = await query(
@@ -79,6 +80,7 @@ export const loadAuth = wrap(async (req, _res, next) => {
       if (r.family_id) req.member = { familyId: r.family_id, role: r.role, status: r.status, familyName: r.family_name };
       if (Date.now() - new Date(r.last_seen).getTime() > 86400000) {
         await query(`UPDATE sessions SET last_seen = now(), expires_at = now() + make_interval(days => $2) WHERE id = $1`, [r.sid, SESSION_DAYS]);
+        setSessionCookie(res, token, config.isProd); // prolonge aussi le cookie : la session glisse côté serveur ET navigateur
       }
     }
   }

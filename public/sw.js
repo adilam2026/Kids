@@ -1,7 +1,7 @@
 // Service worker : met en cache la coquille de l'app (jamais l'API).
 // Les données affichées hors connexion viennent du dernier état enregistré par l'application.
-const CACHE = 'ph-shell-v1';
-const SHELL = ['/', '/app.js', '/styles.css', '/manifest.webmanifest', '/icons/icon.svg'];
+const CACHE = 'ph-shell-v2';
+const SHELL = ['/', '/app.js', '/styles.css', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png', '/icons/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -191,3 +191,9 @@ body.sheet-open { overflow: hidden; }
 .child.mini .pm { margin-top: 8px; gap: 10px; }
 .child.mini .btn.plus, .child.mini .btn.minus { min-height: 44px; padding: 0 12px; font-size: 1.6rem; line-height: 1; border-radius: 16px; }
 .child.mini .btn.plus { box-shadow: 0 3px 0 #1f9a7c; }
+
+.check.sg { align-items: center; min-height: 52px; }
+.check.sg .ic { font-size: 1.5rem; width: 34px; text-align: center; flex: none; }
+.check.sg .tx { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: break-word; hyphens: auto; }
+.check.sg .tx small { display: block; color: var(--muted); font-weight: 500; font-size: .85rem; }
+.check.dim { opacity: .6; }

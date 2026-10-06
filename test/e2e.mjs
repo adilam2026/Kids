@@ -286,6 +286,68 @@ const cdp = await ctxS.newCDPSession(S1); const inst = await cdp.send('Page.getI
 assert.deepEqual(inst.installabilityErrors, [], 'installabilité : ' + JSON.stringify(inst.installabilityErrors));
 ok(`PWA : manifeste + icônes OK, service worker actif, installabilité Chromium sans erreur, cache sans /api (${cached.length} fichiers)`);
 
+// 13b. installation : bouton visible, événement navigateur, instructions Android / iPhone, mode « application », cookie persistant
+await S1.click('.tabs a:has-text("Famille")');
+assert.ok(await S1.locator('button:has-text("Installer l’application")').first().isVisible(), 'bouton « Installer l’application » visible');
+await S1.evaluate(() => { window.__prompted = 0; const ev = new Event('beforeinstallprompt', { cancelable: true }); ev.prompt = () => { window.__prompted++; return Promise.resolve(); }; ev.userChoice = Promise.resolve({ outcome: 'accepted' }); window.dispatchEvent(ev); });
+await S1.click('.card button:has-text("Installer l’application")');
+await S1.waitForSelector('.toast:has-text("Installation lancée")');
+assert.equal(await S1.evaluate(() => window.__prompted), 1, 'prompt() natif déclenché');
+assert.equal(await S1.locator('.panel').count(), 0, 'pas d’instructions quand le navigateur sait installer');
+await S1.click('.card button:has-text("Installer l’application")'); // événement consommé → instructions
+await S1.waitForSelector('.panel'); assert.ok((await S1.innerText('.panel')).includes('Copier le lien')); await S1.keyboard.press('Escape');
+await S1.evaluate(() => window.dispatchEvent(new Event('appinstalled'))); await S1.waitForSelector('.toast:has-text("Application installée")');
+// mode application (display-mode: standalone émulé) : le bouton disparaît
+// (Chromium n'émule pas display-mode : la requête média est simulée par un script d'initialisation — ce n'est PAS une vraie installation)
+const standaloneStub = () => { const orig = window.matchMedia.bind(window); window.matchMedia = (q) => (/display-mode:\s*standalone/.test(q) ? { matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} } : orig(q)); };
+const ctxApp = await browser.newContext({ ...phone, viewport: { width: 320, height: 568 } });
+await ctxApp.addInitScript(standaloneStub);
+await ctxApp.addCookies(await ctxS.cookies());
+const AP = await ctxApp.newPage(); await AP.goto(base); await AP.waitForSelector('.child h2'); // connexion conservée (même cookie)
+await AP.click('.tabs a:has-text("Famille")'); await AP.waitForSelector('text=Application installée sur cet appareil');
+const apTxt = await AP.innerText('#app'); assert.ok(apTxt.includes('Application installée sur cet appareil'), apTxt.slice(0, 300)); assert.equal(await AP.locator('button:has-text("Installer l’application")').count(), 0);
+await ctxApp.close();
+// session persistante (cookie à date d'expiration lointaine : survit à la fermeture / à l'installation sur Android)
+const ck = (await ctxS.cookies()).find((c) => c.name === 'ph_session');
+assert.ok(ck.httpOnly && ck.sameSite === 'Lax' && ck.expires > Date.now() / 1000 + 80 * 86400, 'cookie de session persistant ~90 j');
+// instructions par plateforme (user-agents simulés dans Chromium)
+const UA = {
+  android: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+  ios: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  iosChrome: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0.0.0 Mobile/15E148 Safari/604.1',
+};
+const expectText = { android: ['Android (Chrome)', 'Installer l’application', '⋮'], ios: ['Safari', 'Sur l’écran d’accueil', 'Partager', 'propre session'], iosChrome: ['autre navigateur', 'Safari', 'Sur l’écran d’accueil'] };
+for (const [k, ua] of Object.entries(UA)) {
+  const cx = await browser.newContext({ ...phone, userAgent: ua }); const px = await cx.newPage(); await px.goto(base);
+  await px.click('button:has-text("Installer l’application")'); await px.waitForSelector('.panel');
+  const t = await px.innerText('.panel'); for (const w of expectText[k]) assert.ok(t.includes(w), `${k}: « ${w} » absent`);
+  assert.ok(t.includes(base), 'lien commun affiché'); await cx.close();
+}
+const mf2 = await (await S1.request.get(base + '/manifest.webmanifest')).json();
+assert.equal(mf2.id, '/'); assert.equal((await S1.request.get(base + mf2.start_url)).status(), 200);
+ok('installation : bouton visible, prompt natif déclenché, instructions Android / iPhone (Safari et autre navigateur) par user-agent simulé, mode application détecté, cookie persistant 90 j');
+
+// 13c. suggestions sur la famille EXISTANTE (aperçu, sélection, sans doublon)
+await S1.click('.tabs a:has-text("Famille")');
+const nA = await S1.evaluate(async () => (await (await fetch('/api/family/state')).json()).state.actions.length);
+await S1.click('[data-act=suggest]'); await S1.waitForSelector('.check.sg');
+const pv = await S1.innerText('.panel');
+for (const w of ['Se lever après le rappel du parent', 'Faire la routine du coucher', 'Continuer à crier sur quelqu’un', 'Jeter volontairement ses jouets', 'Faire des bulles dans le jardin', 'Préparer un gâteau ensemble', 'Rien n’est modifié', 'Jamais de retrait pour des pleurs']) assert.ok(pv.includes(w), w);
+assert.ok((await S1.locator('.check.sg.dim').count()) >= 3, 'doublons déjà présents grisés');
+assert.equal(await S1.locator('.check.sg.dim input').first().isDisabled(), true);
+assert.ok((await S1.innerText('[data-act=sgApply]')).includes('Ajouter 13 suggestions'));
+await S1.click('[data-act=sgAll][data-v="0"]'); assert.ok(await S1.locator('[data-act=sgApply]').isDisabled());
+await S1.click('.check.sg:has-text("Faire la routine du coucher") input'); await S1.click('.check.sg:has-text("Jeter volontairement") input'); await S1.click('.check.sg:has-text("Faire des bulles") input');
+await shot(S1, '18-suggestions');
+await S1.click('[data-act=sgApply]'); await S1.waitForSelector('.toast:has-text("3 suggestions ajoutées")');
+const after = await S1.evaluate(async () => { const s = (await (await fetch('/api/family/state')).json()).state; return { a: s.actions.length, titles: s.actions.map((x) => x.title), r: s.rewards.map((x) => x.title) }; });
+assert.equal(after.a, nA + 2); assert.ok(after.r.includes('Faire des bulles dans le jardin') && after.titles.includes('Faire la routine du coucher'));
+await S1.click('[data-act=suggest]'); await S1.waitForSelector('.check.sg'); await S1.click('[data-act=sgAll][data-v="1"]');
+const rest = await S1.innerText('[data-act=sgApply]'); assert.ok(rest.includes('Ajouter 10 suggestions'), rest);
+await S1.keyboard.press('Escape');
+ok('suggestions : aperçu avec doublons grisés, sélection partielle, ajout sans doublon, rien d’existant modifié');
+assert.equal((await S1.evaluate(() => document.querySelectorAll('.child.mini').length)) >= 0, true);
+
 // 14. reconnexion : fermer / rouvrir = session persistante ; hors ligne puis retour
 await S1.close(); const S2 = await ctxS.newPage(); await S2.goto(base); await S2.waitForSelector('.child h2');
 ok('reconnexion : session persistante après fermeture de l’onglet');

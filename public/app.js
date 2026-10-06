@@ -169,6 +169,20 @@ function nextReward(c) {
 const activeChallenges = (c) => S.st.challenges.filter((ch) => ch.childIds.includes(c.id) && !ch.completed && !ch.expired && !ch.upcoming);
 const nm = () => (S.offline ? ' needs-online' : '');
 
+// ---------- installation (PWA) ----------
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function platform() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return /CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(ua) ? 'ios-other' : 'ios';
+  if (/Android/.test(ua)) return /SamsungBrowser/.test(ua) ? 'android-samsung' : 'android';
+  return 'other';
+}
+const installCard = () => isStandalone()
+  ? '<div class="card" style="text-align:center">✅ Application installée sur cet appareil</div>'
+  : `<div class="card" style="background:var(--soft)"><div style="display:flex;gap:12px;align-items:center"><div style="font-size:2.2rem">📲</div>
+      <div style="flex:1"><b>Installer l’application</b><div class="muted small">Icône sur l’écran d’accueil, plein écran</div></div></div>
+      <button class="btn primary block" style="margin-top:10px" data-act="installApp">Installer l’application</button></div>`;
+
 // ---------- effets ----------
 const animOn = () => S.prefs.anim && !matchMedia('(prefers-reduced-motion: reduce)').matches;
 function celebrate(big) {
@@ -265,7 +279,8 @@ function authView() {
       <button class="btn primary block" style="margin-top:16px">Enregistrer</button></form>
       <p style="text-align:center"><button class="link" data-act="auth" data-mode="login">Retour</button></p>`,
   };
-  return `<div class="auth">${logo}<div class="card">${info}${err}${forms[mode] || forms.login}</div></div>`;
+  return `<div class="auth">${logo}<div class="card">${info}${err}${forms[mode] || forms.login}</div>
+    ${isStandalone() ? '' : '<p style="text-align:center"><button class="link" data-act="installApp">📲 Installer l’application</button></p>'}</div>`;
 }
 function recoveryView() {
   return `<div class="auth"><div class="logo"><div class="e">🔐</div><h1>Tes codes de secours</h1></div>
@@ -314,7 +329,8 @@ function childrenView() {
   if (!ks.length) return `<div class="empty"><div class="big">🐣</div><p>Ajoute ton premier enfant pour commencer l’aventure !</p>
     ${canEdit() ? `<button class="btn primary${nm()}" data-act="childForm">Ajouter un enfant</button>` : ''}</div>`;
   return `${ks.map(childCard).join('')}
-    ${canEdit() ? `<button class="btn ghost block${nm()}" data-act="childForm">＋ Ajouter un enfant</button>` : ''}`;
+    ${canEdit() ? `<button class="btn ghost block${nm()}" data-act="childForm">＋ Ajouter un enfant</button>` : ''}
+    ${isStandalone() ? '' : '<p style="text-align:center;margin:4px 0"><button class="link" data-act="installApp">📲 Installer l’application</button></p>'}`;
 }
 
 async function loadHistory(reset, more) {
@@ -436,6 +452,7 @@ function rewardsView() {
         ${canEdit() ? `<button class="btn sm ${can ? 'primary' : ''}${nm()}" ${can ? '' : 'disabled'} data-act="redeem" data-id="${r.id}">Échanger</button>` : ''}</div>` : ''}</div>`;
     }).join('') || '<div class="empty">Aucune récompense pour cet enfant.</div>'}
     ${done.length ? `<h2 class="sec">Déjà réalisées</h2>${done.map((r) => redRow(r, false)).join('')}` : ''}
+    ${canEdit() ? `<button class="btn block${nm()}" data-act="suggest" style="margin-top:14px">✨ Ajouter les suggestions</button>` : ''}
     <p class="muted small" style="text-align:center;margin-top:20px">💛 Les câlins, les repas et les besoins essentiels ne s’échangent jamais contre des points.</p>
     <div class="fab-space"></div>
     ${canEdit() ? `<button class="btn primary fab${nm()}" data-act="rewardForm">＋ Récompense</button>` : ''}`;
@@ -450,7 +467,7 @@ function lockedFamilyView() {
 function familyView() {
   const st = S.st, owner = st.me.role === 'owner';
   const arch = st.children.filter((c) => c.archived);
-  return `<div class="card"><h2>${esc(st.family.name)}</h2><p class="muted small" style="margin:4px 0 0">Connecté : ${esc(st.me.name)} · ${esc(st.me.email)}</p></div>
+  return `${installCard()}<div class="card"><h2>${esc(st.family.name)}</h2><p class="muted small" style="margin:4px 0 0">Connecté : ${esc(st.me.name)} · ${esc(st.me.email)}</p></div>
   <h2 class="sec">Parents</h2><div class="card">${st.members.map((m) => `<div class="who" style="border:0;margin:0;padding:6px 0"><div class="avatar sm" style="--c:#FF8A3D">🧑</div>
     <div class="grow"><b>${esc(m.name)}</b>${m.role === 'owner' ? '<span class="tag">Propriétaire</span>' : ''}${m.status === 'pending' ? '<span class="tag">En attente</span>' : ''}<div class="muted small">${esc(m.email)}</div></div>
     ${owner && m.status === 'pending' ? `<button class="btn sm primary${nm()}" data-act="approve" data-id="${m.id}">Approuver</button>` : ''}
@@ -458,6 +475,7 @@ function familyView() {
     ${owner ? `<button class="btn block${nm()}" style="margin-top:10px" data-act="invite">✉️ Inviter l’autre parent</button>
     ${st.invites.length ? `<p class="muted small">${st.invites.length} code(s) actif(s) — <button class="link small" data-act="invites">gérer</button></p>` : ''}` : ''}</div>
   <h2 class="sec">Personnaliser</h2>
+  <button class="row${nm()}" data-act="suggest"><div class="ic">✨</div><div class="tx">Ajouter les suggestions<small>Actions, petits malus et récompenses : aperçu et choix</small></div>›</button>
   <a class="row" href="#/library"><div class="ic">📚</div><div class="tx">Bibliothèque d’actions<small>Créer, modifier, favoris</small></div>›</a>
   ${owner ? `<button class="row${nm()}" data-act="quickForm"><div class="ic">⚡</div><div class="tx">Valeurs rapides<small>+ ${st.family.quickPlus.join(', ')} · − ${st.family.quickMinus.join(', ')}</small></div>›</button>` : ''}
   <button class="row" data-act="toggleAnim"><div class="ic">✨</div><div class="tx">Animations<small>${matchMedia('(prefers-reduced-motion: reduce)').matches ? 'Réduites (réglage de l’appareil)' : S.prefs.anim ? 'Activées' : 'Désactivées'}</small></div><b>${S.prefs.anim ? 'Oui' : 'Non'}</b></button>
@@ -484,6 +502,7 @@ function libraryView() {
     <button class="icon-btn${nm()}" data-act="actionForm" data-id="${a.id}" aria-label="Modifier">✏️</button></div>`;
   const arch = acts.filter((a) => a.archived);
   return `<a class="back" href="#/family">‹ Famille</a><h2>Bibliothèque d’actions</h2>
+    <button class="btn block${nm()}" data-act="suggest" style="margin:8px 0">✨ Ajouter les suggestions</button>
     <p class="muted small">Ce sont des suggestions : tu peux tout changer, ajouter ou archiver.</p>
     ${themes.map((t) => `<div class="theme">${esc(t)}</div>${acts.filter((a) => !a.archived && a.theme === t).map(row).join('')}`).join('')}
     ${arch.length ? `<div class="theme">Archivées</div>${arch.map((a) => `<div class="row" style="cursor:default;opacity:.7"><div class="ic">${a.icon}</div><div class="tx">${esc(a.title)}</div>
@@ -500,7 +519,7 @@ function closeSheet() { S.sheet = null; document.body.classList.remove('sheet-op
 function renderSheet(fromPoll) {
   if (fromPoll) return; // on ne touche pas à une saisie en cours ; la vue se met à jour à la fermeture
   const s = S.sheet; if (!s) return;
-  const bodies = { regen: regenSheet, points: pointsSheet, childForm, actionForm, challengeForm, rewardForm, quickForm, invite: inviteSheet, invites: invitesSheet,
+  const bodies = { suggest: suggestSheet, regen: regenSheet, points: pointsSheet, childForm, actionForm, challengeForm, rewardForm, quickForm, invite: inviteSheet, invites: invitesSheet,
     memberMenu, chpw: chpwSheet, install: installSheet, lockSet: () => pinSheet(true), unlock: () => pinSheet(false), confirm: confirmSheet, info: infoSheet };
   const [title, html] = bodies[s.kind](s);
   $('#sheet').innerHTML = `<div class="backdrop" data-act="closeBackdrop"><div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -544,7 +563,7 @@ function pointsSheet(s) {
   if (s.tab === 'free' && plus) body = quick(st.family.quickPlus, 'pos') + custom + reason(false);
   else if (s.tab === 'bonus') body = `<p class="muted small">Pour un moment exceptionnel : un grand effort, une belle surprise…</p>${quick([5, 10, 15, 20], 'pos')}${custom}${reason(false)}`;
   else if (s.tab === 'action') body = list(posActions(c));
-  else if (s.tab === 'behavior') body = `<p class="muted small">Des repères, pas des règles. À utiliser avec bienveillance, après avoir expliqué.</p>${list(negActions(c))}`;
+  else if (s.tab === 'behavior') body = `<p class="muted small">Des repères, pas des règles : seulement après un rappel clair, avec bienveillance. Jamais pour des pleurs, des réveils de nuit ou des besoins essentiels.</p>${list(negActions(c))}`;
   else body = quick(st.family.quickMinus.map((v) => -v), 'neg') + custom + reason(true);
   return [`<span style="font-size:1.6rem">${c.avatar}</span> ${plus ? 'Donner' : 'Retirer'} des points · ${esc(c.name)}`,
     `<div class="seg">${tabs.map(([k, l]) => `<button class="${s.tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${l}</button>`).join('')}</div>
@@ -630,6 +649,25 @@ function chpwSheet() {
     <label class="f">Nouveau (10 caractères minimum)</label><input type="password" name="password" required minlength="10" autocomplete="new-password">
     <button class="btn primary block${nm()}" style="margin-top:14px">Enregistrer</button></form>`];
 }
+function suggestSheet(s) {
+  if (!s.data) return ['Ajouter les suggestions', `<div class="empty">${s.error ? '' : 'Chargement…'}</div>`];
+  const row = (kind, it) => {
+    const ex = it.existing, val = kind === 'r' ? `${it.cost} pts` : signed(it.value);
+    const note = ex ? `<small>Déjà présent${ex.archived ? ' (archivé)' : ''}${(kind === 'r' ? ex.cost !== it.cost : ex.value !== it.value) ? ` · ta valeur : ${kind === 'r' ? `${ex.cost} pts` : signed(ex.value)}` : ''} — conservé tel quel</small>` : `<small>${esc(it.theme || 'Catalogue')}</small>`;
+    return `<label class="check sg ${ex ? 'dim' : ''}"><input type="checkbox" data-act="sgToggle" data-id="${kind}${it.key}" ${ex ? 'disabled' : ''} ${s.sel[kind + it.key] ? 'checked' : ''}>
+      <span class="ic">${it.icon}</span><span class="tx">${esc(it.title)}${note}</span><span class="val ${kind === 'r' ? '' : it.value > 0 ? 'p' : 'n'}">${val}</span></label>`;
+  };
+  const good = s.data.actions.filter((a) => !a.malus), mal = s.data.actions.filter((a) => a.malus);
+  return ['Ajouter les suggestions', `<p class="muted small">Coche ce que tu veux ajouter. <b>Rien n’est modifié ni supprimé</b> : tes actions, récompenses, soldes et historique restent tels quels, et tu pourras tout changer ensuite.</p>
+    <div style="display:flex;gap:8px;margin-bottom:6px"><button class="btn sm" data-act="sgAll" data-v="1">Tout cocher</button><button class="btn sm" data-act="sgAll" data-v="0">Tout décocher</button></div>
+    <div class="theme">Bonnes actions</div>${good.map((x) => row('a', x)).join('')}
+    <div class="theme">Petits malus — après un rappel clair</div>
+    <p class="muted small" style="margin:0 4px 6px">Jamais de retrait pour des pleurs, du chagrin ou des réveils nocturnes.</p>${mal.map((x) => row('a', x)).join('')}
+    <div class="theme">Récompenses</div>${s.data.rewards.map((x) => row('r', x)).join('')}
+    <div class="confirm-bar" id="sgslot">${sgBar(s)}</div>`];
+}
+const sgCount = (s) => Object.values(s.sel).filter(Boolean).length;
+const sgBar = (s) => `<button class="btn primary block${nm()}" data-act="sgApply" ${sgCount(s) ? '' : 'disabled'}>${sgCount(s) ? `Ajouter ${sgCount(s)} suggestion${sgCount(s) > 1 ? 's' : ''}` : 'Rien de sélectionné'}</button>`;
 function regenSheet(s) {
   if (s.codes) return ['Nouveaux codes de secours', `<p><b>Note-les maintenant</b> : les anciens sont invalidés et ceux-ci ne seront plus affichés.</p><div class="recovery">${s.codes.map((c) => `<code>${esc(c)}</code>`).join('')}</div>
     <button class="btn block" data-act="copyRegen">📋 Copier</button><button class="btn primary block" style="margin-top:10px" data-act="closeSheet">J’ai noté mes codes</button>`];
@@ -638,9 +676,22 @@ function regenSheet(s) {
     <button class="btn primary block${nm()}" style="margin-top:14px">Générer</button></form>`];
 }
 function installSheet() {
-  return ['Installer l’application', `<p><b>iPhone (Safari)</b> : bouton Partager <span style="font-size:1.2rem">⬆️</span> › « Sur l’écran d’accueil ».</p>
-    <p><b>Android (Chrome)</b> : menu ⋮ › « Installer l’application » ou « Ajouter à l’écran d’accueil ».</p>
-    ${S.installEvt ? '<button class="btn primary block" data-act="doInstall">Installer maintenant</button>' : ''}`];
+  const p = platform();
+  const ios = ['<li>Ouvre ce lien dans <b>Safari</b>.</li>', '<li>Touche le bouton <b>Partager</b> ⬆️ (barre du bas).</li>', '<li>Choisis <b>« Sur l’écran d’accueil »</b>, puis <b>Ajouter</b>.</li>',
+    '<li>Ouvre l’app depuis la nouvelle icône 🦸. <b>Sur iPhone, l’app installée a sa propre session</b> : connecte-toi une fois ; la connexion est ensuite conservée.</li>'];
+  const guide = {
+    ios: ['iPhone / iPad (Safari)', ios],
+    'ios-other': ['iPhone / iPad', ['<li>Tu utilises un autre navigateur que Safari. Si <b>Partager › Sur l’écran d’accueil</b> n’apparaît pas, copie le lien ci-dessous et ouvre-le dans <b>Safari</b>.</li>', ...ios.slice(1)]],
+    android: ['Android (Chrome)', ['<li>Touche le menu <b>⋮</b> en haut à droite.</li>', '<li>Choisis <b>« Installer l’application »</b> (ou « Ajouter à l’écran d’accueil »).</li>', '<li>Confirme : l’icône 🦸 apparaît sur l’écran d’accueil.</li>']],
+    'android-samsung': ['Android (Samsung Internet)', ['<li>Touche le menu <b>≡</b> en bas.</li>', '<li>Choisis <b>« Ajouter la page à »</b> › <b>« Écran d’accueil »</b>.</li>', '<li>Pour une installation complète, Chrome est recommandé.</li>']],
+    other: ['Ordinateur', ['<li>Chrome / Edge : icône <b>Installer</b> dans la barre d’adresse, ou menu › « Installer Petits Héros ».</li>', '<li>Pour un téléphone, ouvre ce lien sur le téléphone.</li>']],
+  }[p];
+  return ['Installer l’application', `<p><b>${guide[0]}</b></p><ol style="padding-left:22px;line-height:1.6">${guide[1].join('')}</ol>
+    ${S.installEvt ? '<button class="btn primary block" data-act="doInstall">Installer maintenant</button>' : ''}
+    <div class="theme">Les deux parents : le même lien</div>
+    <div class="big-code" style="font-size:1.05rem;letter-spacing:0;white-space:normal;word-break:break-all">${esc(location.origin)}</div>
+    <button class="btn block" data-act="copyLink">📋 Copier le lien</button>
+    <p class="muted small">Même lien, mêmes données : chaque parent se connecte avec son propre compte.</p>`];
 }
 const infoSheet = (s) => [esc(s.title), `<p>${esc(s.text)}</p><button class="btn primary block" data-act="closeSheet">OK</button>`];
 const confirmSheet = (s) => [esc(s.title), `<p>${esc(s.text)}</p><button class="btn ${s.danger ? 'danger' : 'primary'} block${nm()}" data-act="confirmYes">${esc(s.label)}</button>
@@ -677,6 +728,38 @@ const A = {
   closeBackdrop: (d, el, ev) => { if (ev.target === el) closeSheet(); },
   auth: (d) => { S.auth = { mode: d.mode, error: '', info: '' }; render(); },
   logout: async () => { try { await api('POST', '/api/auth/logout', {}); } catch { /* déjà déconnecté */ } wipeLocal(); S.me = null; S.auth = { mode: 'login', error: '', info: '' }; go('#/'); render(); },
+
+  // suggestions
+  suggest: () => {
+    openSheet({ kind: 'suggest', data: null, sel: {} });
+    run(async () => {
+      const r = await api('GET', '/api/family/suggestions');
+      const s = S.sheet; if (!s || s.kind !== 'suggest') return;
+      s.data = r;
+      for (const a of r.actions) if (!a.existing) s.sel[`a${a.key}`] = true;
+      for (const w of r.rewards) if (!w.existing) s.sel[`r${w.key}`] = true;
+      renderSheet();
+    });
+  },
+  sgToggle: (d, el) => { S.sheet.sel[d.id] = el.checked; $('#sgslot').innerHTML = sgBar(S.sheet); },
+  sgAll: (d) => { document.querySelectorAll('[data-act=sgToggle]:not(:disabled)').forEach((i) => { i.checked = d.v === '1'; S.sheet.sel[i.dataset.id] = i.checked; }); $('#sgslot').innerHTML = sgBar(S.sheet); },
+  sgApply: () => run(async () => {
+    const s = S.sheet, on = (p) => Object.keys(s.sel).filter((k) => s.sel[k] && k[0] === p).map((k) => k.slice(1));
+    const r = await write('POST', '/api/family/suggestions/apply', { actionKeys: on('a'), rewardKeys: on('r') });
+    closeSheet();
+    const n = r.addedActions + r.addedRewards;
+    toast(n ? `<b>${n}</b> suggestion${n > 1 ? 's' : ''} ajoutée${n > 1 ? 's' : ''} ✓` : 'Rien à ajouter : déjà présent');
+  }),
+
+  // installation
+  installApp: async () => {
+    const ev = S.installEvt;
+    if (!ev) { openSheet({ kind: 'install' }); return; }
+    S.installEvt = null;
+    try { await ev.prompt(); const c = await ev.userChoice; toast(c?.outcome === 'accepted' ? 'Installation lancée… cherche l’icône Petits Héros' : 'Installation annulée'); }
+    catch { openSheet({ kind: 'install' }); }
+  },
+  copyLink: async () => { try { await navigator.clipboard.writeText(location.origin); toast('Lien copié'); } catch { toast('Copie impossible', { error: true }); } },
 
   // codes de secours
   copyRecovery: async () => { try { await navigator.clipboard.writeText(S.recovery.join('\n')); toast('Codes copiés'); } catch { toast('Copie impossible', { error: true }); } },
@@ -779,7 +862,7 @@ const A = {
   unlock: () => openSheet({ kind: 'unlock' }),
   chpw: () => openSheet({ kind: 'chpw' }),
   installHelp: () => openSheet({ kind: 'install' }),
-  doInstall: async () => { S.installEvt?.prompt(); S.installEvt = null; closeSheet(); },
+  doInstall: async () => { const ev = S.installEvt; S.installEvt = null; closeSheet(); try { await ev?.prompt(); } catch { /* refusé par le navigateur */ } },
   exportData: () => run(async () => {
     const r = await fetch('/api/family/export', { credentials: 'same-origin' });
     if (!r.ok) throw new Error('Export impossible');
@@ -859,6 +942,7 @@ document.addEventListener('input', (e) => {
 });
 window.addEventListener('hashchange', () => { clearToast(); S.hist = null; if (!S.sheet) render(); else closeSheet(); window.scrollTo(0, 0); });
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.installEvt = e; });
+window.addEventListener('appinstalled', () => { S.installEvt = null; if (!S.sheet) render(); toast('Application installée ✓'); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
 
 // clavier mobile : la fenêtre suit la zone réellement visible et le champ actif reste visible

@@ -51,7 +51,7 @@ Variables : voir `.env.example`.
 # Base de test DÉDIÉE, jamais DATABASE_URL (les tests ne la lisent pas) :
 createdb kids_test
 export TEST_DATABASE_URL=postgres://postgres@localhost:5432/kids_test
-npm test                 # 25 tests : API sur PostgreSQL réel + garde-fous
+npm test                 # 28 tests : API sur PostgreSQL réel + garde-fous
 npm run redeploy-test    # processus réel arrêté puis relancé : données conservées
 npm run e2e              # « téléphones » Chromium (Playwright requis) : interface, mobile, PWA, sécurité locale
 ```
@@ -68,11 +68,17 @@ npm run e2e              # « téléphones » Chromium (Playwright requis) : int
 | Membre retiré alors que son téléphone est **hors ligne** | Il peut **encore lire** la copie locale (jamais modifier) jusqu'à la reconnexion ou 7 jours ; le serveur lui refuse tout dès qu'il se reconnecte |
 | Service worker | Ne met en cache que la coquille (`/`, JS, CSS, icônes) ; **jamais** `/api/*` (`Cache-Control: no-store` côté serveur) |
 
+## Suggestions et installation
+
+* **Ajouter les suggestions** (Famille, Bibliothèque ou Récompenses) : aperçu avec cases à cocher, doublons détectés (titre normalisé ou ancien intitulé) et grisés, jamais de remplacement d'une action ou récompense existante (même personnalisée), aucun solde ni historique modifié. Le catalogue est dans `server/seed.js` ; l'ajout est atomique et idempotent. Aucun malus pour pleurs, chagrin ou réveils nocturnes (vérifié par test).
+* **Installer l'application** : bouton visible (Famille, liste Enfants, écran de connexion). Il déclenche l'installation native quand le navigateur l'autorise, sinon affiche les instructions Android (Chrome / Samsung Internet) ou iPhone (Safari / autre navigateur) et le lien commun aux deux parents.
+* **Connexion** : cookie persistant 90 jours, prolongé à l'usage. ⚠️ Sur **iPhone**, l'app installée ne partage pas la session de Safari : il faut s'y connecter une fois. Sur Android (Chrome) la session est normalement partagée — à confirmer sur le téléphone.
+
 ## Vérification mobile
 
 | Vérifié par test automatique (Chromium émulé mobile, 390×780 et 320×568) | À vérifier sur appareils réels |
 |---|---|
-| Manifeste + icônes, service worker actif, **installabilité Chromium sans erreur** | Installation réelle Android (Chrome) et iPhone (Safari › Sur l'écran d'accueil), icône, plein écran, barre d'état |
+| Manifeste + icônes, service worker actif, **installabilité Chromium sans erreur**, bouton « Installer » (événement `beforeinstallprompt` simulé), instructions Android/iPhone (user-agents simulés), mode application (requête média simulée), cookie persistant | Installation réelle Android (Chrome) et iPhone (Safari › Sur l'écran d'accueil), icône sur l'écran d'accueil, plein écran, barre d'état, session conservée après installation (Android) / reconnexion unique (iPhone) |
 | Aucun débordement horizontal, cibles ≥ 44 px, texte ≥ 13,5 px, 4 onglets | Rendu réel des polices système, encoche / barre d'accueil iPhone (`safe-area`) |
 | Fenêtres : défilement interne, fond figé, bouton Confirmer atteignable | **Vrai clavier** iOS/Android (ici : viewport réduit simulé + `visualViewport`) |
 | Notifications contenues dans l'en-tête fixe, confettis ≤ 5, `prefers-reduced-motion` respecté | Réglage « réduire les animations » réel d'iOS/Android |
