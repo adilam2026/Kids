@@ -170,3 +170,24 @@ body.sheet-open { overflow: hidden; }
 .recovery { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
 .recovery code { background: #fff; border: 2px dashed var(--line); border-radius: 14px; padding: 12px 6px; text-align: center; font-weight: 800; font-size: 1rem; letter-spacing: .02em; user-select: all; }
 @media (max-width: 360px) { .quick { gap: 6px; } .quick button { font-size: 1.3rem; } .bal b { font-size: 2rem; } .recovery { grid-template-columns: 1fr; } }
+
+/* Cartes de la liste Enfants : compactes (≈ 200 px) pour en voir deux sans défilement.
+   Réservé à .child.mini : la page détaillée et les fenêtres ne changent pas. */
+.child.mini { padding: 8px 12px 10px; margin: 0 0 8px; border-top-width: 6px; }
+.child.mini .child-head { gap: 10px; min-width: 0; }
+.child.mini .avatar { width: 48px; height: 48px; font-size: 1.7rem; }
+.child.mini .who-n { min-width: 0; flex: 1; }
+.child.mini .child-head h2 { font-size: 20px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.child.mini .child-head .sub { font-size: .85rem; line-height: 1.2; }
+.child.mini .bal b { font-size: 32px; line-height: 1; }
+.child.mini .bal span { font-size: .78rem; margin-top: 1px; }
+.child.mini .next { margin-top: 6px; }
+.child.mini .nl { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: .92rem; line-height: 1.25; }
+.child.mini .nl .t { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.child.mini .nl .muted { white-space: nowrap; font-size: .85rem; flex: none; }
+.child.mini .bar { height: 6px; margin: 4px 0 0; }
+.child.mini .chips { margin-top: 6px; }
+.child.mini .chip { min-height: 26px; padding: 2px 10px; font-size: .85rem; }
+.child.mini .pm { margin-top: 8px; gap: 10px; }
+.child.mini .btn.plus, .child.mini .btn.minus { min-height: 44px; padding: 0 12px; font-size: 1.6rem; line-height: 1; border-radius: 16px; }
+.child.mini .btn.plus { box-shadow: 0 3px 0 #1f9a7c; }

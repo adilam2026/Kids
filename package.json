@@ -13,6 +13,7 @@
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "icons": "node scripts/make-icons.mjs",
     "e2e": "node test/e2e.mjs",
+    "cards-test": "node test/cards-layout.mjs",
     "redeploy-test": "node test/redeploy.mjs",
     "backup": "sh scripts/backup.sh"
   },

@@ -295,15 +295,15 @@ function pendingView() {
 // ---------- rendu : enfants ----------
 function childCard(c) {
   const nx = nextReward(c), ch = activeChallenges(c).length;
-  return `<article class="card child ${S.pulse === c.id ? 'pop' : ''}" style="--c:${c.color}">
+  // carte compacte (liste Enfants uniquement) : en-tête, une ligne de récompense, défi, boutons
+  return `<article class="card child mini ${S.pulse === c.id ? 'pop' : ''}" style="--c:${c.color}">
     <a class="child-head" href="#/child/${c.id}">
       <div class="avatar">${c.avatar}</div>
-      <div><h2>${esc(c.name)}</h2><div class="sub">${c.age != null ? `${c.age} an${c.age > 1 ? 's' : ''} · ` : ''}Voir le profil ›</div></div>
+      <div class="who-n"><h2>${esc(c.name)}</h2><div class="sub">${c.age != null ? `${c.age} an${c.age > 1 ? 's' : ''} · ` : ''}Profil ›</div></div>
       <div class="bal"><b>${c.balance}</b><span>points</span></div>
     </a>
-    ${nx ? `<div class="next"><span class="t">${nx.rw.icon} ${esc(nx.rw.title)}</span>
-      <div class="bar"><i style="width:${nx.pct}%"></i></div>
-      <span class="muted small">${nx.left ? `Encore ${pts(nx.left)}` : 'Prêt à échanger ! 🎉'}</span></div>` : ''}
+    ${nx ? `<div class="next"><div class="nl"><span class="t">${nx.rw.icon} ${esc(nx.rw.title)}</span><span class="muted">${nx.left ? `encore ${nx.left}` : 'prêt ! 🎉'}</span></div>
+      <div class="bar"><i style="width:${nx.pct}%"></i></div></div>` : ''}
     ${ch ? `<div class="chips"><span class="chip">🎯 ${ch} défi${ch > 1 ? 's' : ''} en cours</span></div>` : ''}
     ${canEdit() ? `<div class="pm"><button class="btn minus${nm()}" data-act="points" data-id="${c.id}" data-sign="-" aria-label="Retirer des points à ${esc(c.name)}">−</button>
       <button class="btn plus${nm()}" data-act="points" data-id="${c.id}" data-sign="+" aria-label="Donner des points à ${esc(c.name)}">+</button></div>` : ''}
