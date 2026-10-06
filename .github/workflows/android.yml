@@ -1,7 +1,7 @@
 name: Android APK
 
 # 1) « Compilation de contrôle » : à chaque modification de l'application Android, sans aucun secret.
-#    Elle prouve que le projet compile ; l'APK produit (signé avec une clé de débogage) n'est PAS publié.
+#    Elle prouve que le projet compile ; l'APK de TEST produit (clé de débogage) est conservé 7 jours comme artefact.
 # 2) « APK signé » : à la demande (Actions > Android APK > Run workflow) ou sur un tag android-v*.
 #    Exige les 5 secrets de signature (voir docs/ANDROID.md), refuse de continuer s'il en manque un,
 #    vérifie que l'APK est signé par LA bonne clé (empreinte ANDROID_CERT_SHA256) puis le publie dans une Release.
@@ -51,11 +51,18 @@ jobs:
       - name: Compiler (assembleDebug)
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
+      - name: Conserver l'APK de test (signature de débogage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: petits-heros-test-android
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+          if-no-files-found: error
       - name: Résultat
         run: |
           ls -l android/app/build/outputs/apk/debug/*.apk
           echo "### Compilation OK" >> "$GITHUB_STEP_SUMMARY"
-          echo "APK de contrôle signé avec une clé de débogage : **ne pas l'installer** (il ne pourrait pas être remplacé par la version signée)." >> "$GITHUB_STEP_SUMMARY"
+          echo "APK de TEST signé avec une clé de débogage (artefact **petits-heros-test-android**, 7 jours). Installable pour essayer ; pour passer à la signature définitive il faudra le désinstaller puis installer l'APK de production (même nom, clé différente)." >> "$GITHUB_STEP_SUMMARY"
 
   # Essai à blanc : même chaîne que la release (build, signature, vérification avec les VRAIS apksigner/aapt2)
   # mais avec une clé JETABLE créée sur le runner et détruite. Rien n'est publié ni conservé.

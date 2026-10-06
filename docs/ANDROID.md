@@ -84,7 +84,7 @@ Icônes : `npm run android:icons` (Playwright requis ; les PNG sont versionnés)
 | Interface embarquée (build `www`) dans **Chromium mobile**, origine ≠ API : connexion, jeton stocké, aucun cookie, reconnexion après fermeture, synchro app ↔ web, retrait de membre, hors ligne, Retour (via le pont), zones de sécurité, clavier simulé, export, 2ᵉ parent | **Testé** (`npm run native-test`) — plugins natifs **simulés** |
 | Génération de la clé, extraction de l'empreinte, vérification d'APK (signature/identité/version, cas d'échec) | **Testé en local** (avec un faux `apksigner`/`aapt2`) |
 | Synchronisation Capacitor (`cap sync`), YAML du workflow | **Exécuté / validé** |
-| **Compilation Gradle de l'APK** | **Réussie sur GitHub Actions** (workflow « Compilation de contrôle », run n° 1, commit `7bebc6a`, `assembleDebug` en 1 min 40 s, APK de contrôle produit — signé avec une clé de débogage, non publié). Non exécutable dans mon propre environnement. |
+| **Compilation Gradle de l’APK** | **Réussie sur GitHub Actions** (workflow « Compilation de contrôle »). L’APK de TEST (clé de débogage) est conservé 7 jours dans l’artefact `petits-heros-test-android` : installable pour essayer ; le passage à l’APK de production (autre clé) exigera de désinstaller le test. |
 | **Chaîne de signature complète sur GitHub avec les vrais `apksigner`/`aapt2`** | **Exécutée avec succès en mode dry-run** (run n° 3, clé jetable détruite, contre-épreuve : une mauvaise empreinte est refusée) |
 | APK signé avec la clé définitive | **Pas encore produit** (nécessite l'étape 1) |
 | Installation, icône, Retour, clavier, zones de sécurité, partage de fichier, reprise sur un **vrai téléphone Android** | **Non testé** — à faire après installation (liste dans le bilan) |
