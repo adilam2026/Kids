@@ -68,6 +68,10 @@ npm run e2e              # « téléphones » Chromium (Playwright requis) : int
 | Membre retiré alors que son téléphone est **hors ligne** | Il peut **encore lire** la copie locale (jamais modifier) jusqu'à la reconnexion ou 7 jours ; le serveur lui refuse tout dès qu'il se reconnecte |
 | Service worker | Ne met en cache que la coquille (`/`, JS, CSS, icônes) ; **jamais** `/api/*` (`Cache-Control: no-store` côté serveur) |
 
+## Application Android (APK)
+
+Voir [`docs/ANDROID.md`](docs/ANDROID.md) : projet Capacitor (`android/`), interface embarquée, connexion par jeton Bearer, workflow GitHub Actions de compilation/signature, procédure de mise à jour. `npm run native-test` teste l'interface embarquée dans Chromium.
+
 ## Suggestions et installation
 
 * **Ajouter les suggestions** (Famille, Bibliothèque ou Récompenses) : aperçu avec cases à cocher, doublons détectés (titre normalisé ou ancien intitulé) et grisés, jamais de remplacement d'une action ou récompense existante (même personnalisée), aucun solde ni historique modifié. Le catalogue est dans `server/seed.js` ; l'ajout est atomique et idempotent. Aucun malus pour pleurs, chagrin ou réveils nocturnes (vérifié par test).

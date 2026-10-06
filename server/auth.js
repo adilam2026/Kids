@@ -61,8 +61,13 @@ export async function createSession(userId) {
 }
 
 // Charge l'utilisateur et son appartenance familiale (jamais lue depuis le client).
+// Jeton : en-tête Authorization (application Android) OU cookie (navigateur). Si un en-tête Authorization est
+// présent il est le seul pris en compte (jamais de repli sur le cookie).
+export const isNativeClient = (req) => /^native-android\//.test(req.get('x-client') || '');
 export const loadAuth = wrap(async (req, res, next) => {
-  const token = parseCookies(req.headers.cookie)[COOKIE];
+  const authz = req.get('authorization');
+  const token = authz !== undefined ? (/^Bearer ([A-Za-z0-9_-]{20,100})$/.exec(authz)?.[1]) : parseCookies(req.headers.cookie)[COOKIE];
+  req.authVia = authz !== undefined ? 'bearer' : 'cookie';
   if (token) {
     const { rows } = await query(
       `SELECT s.id AS sid, s.last_seen, u.id, u.email, u.name,
@@ -80,7 +85,7 @@ export const loadAuth = wrap(async (req, res, next) => {
       if (r.family_id) req.member = { familyId: r.family_id, role: r.role, status: r.status, familyName: r.family_name };
       if (Date.now() - new Date(r.last_seen).getTime() > 86400000) {
         await query(`UPDATE sessions SET last_seen = now(), expires_at = now() + make_interval(days => $2) WHERE id = $1`, [r.sid, SESSION_DAYS]);
-        setSessionCookie(res, token, config.isProd); // prolonge aussi le cookie : la session glisse côté serveur ET navigateur
+        if (req.authVia === 'cookie') setSessionCookie(res, token, config.isProd); // prolonge aussi le cookie : la session glisse côté serveur ET navigateur
       }
     }
   }
@@ -101,4 +106,13 @@ export function requireParent(req, _res, next) {
 export function requireOwner(req, _res, next) {
   if (req.member?.role !== 'owner' || req.member.status !== 'active') return next(new HttpError(403, 'Réservé au parent propriétaire de la famille', 'owner_only'));
   next();
+}
+
+// Ouvre une session : cookie pour le navigateur ; jeton renvoyé dans la réponse pour l'application Android
+// (le WebView Capacitor n'est pas de même origine que l'API : on ne compte pas sur les cookies).
+export async function startSession(req, res, userId) {
+  const token = await createSession(userId);
+  if (isNativeClient(req)) return { token };
+  setSessionCookie(res, token, config.isProd);
+  return {};
 }

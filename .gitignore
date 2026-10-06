@@ -2,3 +2,15 @@ node_modules
 .env
 *.log
 backups/
+
+# --- Android / signature : JAMAIS dans le dépôt ---
+*.jks
+*.keystore
+*.p12
+keystore.properties
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/capacitor-cordova-android-plugins/
+www/

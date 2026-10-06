@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { query } from './db.js';
 import { HttpError, wrap } from './util.js';
-import { loadAuth } from './auth.js';
+import { loadAuth, isNativeClient } from './auth.js';
 import { authRouter } from './routes/auth.js';
 import { familyRouter } from './routes/family.js';
 import { dataRouter, META } from './routes/data.js';
@@ -39,10 +39,35 @@ export function createApp() {
     } catch { res.status(503).json({ ok: false, db: false }); }
   });
 
+  // CORS strict pour l'application Android (jetons Bearer, pas de cookies → pas de Allow-Credentials)
+  app.use('/api', (req, res, next) => {
+    const origin = req.get('origin');
+    const allowed = origin && config.corsOrigins.includes(origin);
+    if (allowed) {
+      res.set({
+        'Access-Control-Allow-Origin': origin, Vary: 'Origin',
+        'Access-Control-Allow-Headers': 'authorization, content-type, x-op-id, x-client',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+        'Access-Control-Expose-Headers': 'Retry-After', 'Access-Control-Max-Age': '600',
+      });
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(allowed || !origin ? 204 : 403);
+    next();
+  });
+  // Mise à jour obligatoire : l'interface Android est embarquée, l'API doit pouvoir refuser un build trop ancien
+  app.use('/api', (req, _res, next) => {
+    const m = /^native-android\/(\d+)$/.exec(req.get('x-client') || '');
+    if (m && Number(m[1]) < config.minNativeBuild) return next(new HttpError(426, 'Mise à jour de l’application nécessaire.', 'upgrade_required'));
+    next();
+  });
   app.use('/api', express.json({ limit: '50kb' }));
-  // Protection CSRF : cookie SameSite=Lax + Origin vérifié sur les écritures + JSON obligatoire
+  // Protection CSRF (requêtes authentifiées par COOKIE) : Origin vérifié sur les écritures + JSON obligatoire.
+  // Les requêtes à jeton Bearer n'utilisent aucun identifiant ambiant : pas de CSRF possible.
   app.use('/api', (req, _res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    // Jeton Bearer, ou client natif (en-tête X-Client = préflight CORS obligatoire, accordé à la seule origine de l'application)
+    const nativeApp = isNativeClient(req) && config.corsOrigins.includes(req.get('origin'));
+    if (req.get('authorization') !== undefined || nativeApp) { if (req.method !== 'DELETE' && !req.is('application/json')) return next(new HttpError(415, 'JSON attendu')); return next(); }
     const origin = req.get('origin');
     let originHost = null;
     try { originHost = origin ? new URL(origin).host : null; } catch { return next(new HttpError(403, 'Origine refusée')); }
@@ -53,7 +78,7 @@ export function createApp() {
   app.use('/api', loadAuth);
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
-  app.get('/api/meta', (_req, res) => res.json(META));
+  app.get('/api/meta', (_req, res) => res.json({ ...META, minNativeBuild: config.minNativeBuild }));
   app.use('/api/auth', authRouter);
   app.use('/api/family', familyRouter);
   app.use('/api', dataRouter);

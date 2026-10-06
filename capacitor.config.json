@@ -1,0 +1,14 @@
+{
+  "appId": "fr.petitsheros.app",
+  "appName": "Petits Héros",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#FFF7EC",
+    "webContentsDebuggingEnabled": false
+  }
+}

@@ -15,10 +15,23 @@
     "e2e": "node test/e2e.mjs",
     "cards-test": "node test/cards-layout.mjs",
     "redeploy-test": "node test/redeploy.mjs",
-    "backup": "sh scripts/backup.sh"
+    "backup": "sh scripts/backup.sh",
+    "android:web": "node scripts/build-www.mjs && npx cap sync android",
+    "android:icons": "node scripts/make-android-icons.mjs",
+    "native-test": "node test/native-e2e.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
     "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.4",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/share": "^8.0.3",
+    "esbuild": "^0.28.2"
   }
 }

@@ -17,8 +17,15 @@ const TYPE = {
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* stockage indisponible */ } };
 
+// ---------- application Android (Capacitor) ----------
+// Le WebView n'est pas de même origine que l'API : pas de cookies, mais un jeton Bearer conservé dans le
+// stockage privé de l'application (@capacitor/preferences). Le navigateur garde le cookie HttpOnly.
+const NATIVE = !!window.PHNative?.isNative;
+const API_BASE = window.PH_API_BASE || '';
+const APP_BUILD = Number(window.PH_BUILD || 0), APP_VERSION = window.PH_VERSION || 'web';
+
 const S = {
-  me: null, st: null, offline: false, busy: false, sheet: null, pulse: null,
+  token: '', upgrade: false, me: null, st: null, offline: false, busy: false, sheet: null, pulse: null,
   prefs: load('ph_prefs', { anim: !matchMedia('(prefers-reduced-motion: reduce)').matches }), lock: load('ph_lock', { on: false }),
   rewardChild: null, hist: null, auth: { mode: 'login', error: '', info: '' }, libOpen: false,
 };
@@ -31,6 +38,7 @@ function wipeLocal() {
   stopPolling();
   S.st = null; S.hist = null; S.rewardChild = null; S.sheet = null; S.undo = null; S.recovery = null;
   intents.clear();
+  if (NATIVE) { S.token = ''; window.PHNative.clearToken(); }
   const sh = document.getElementById('sheet'); if (sh) sh.innerHTML = '';
   const t = document.getElementById('toast'); if (t) t.innerHTML = '';
   document.body.classList.remove('sheet-open');
@@ -48,6 +56,7 @@ class ApiError extends Error { constructor(m, status, code) { super(m); this.sta
 async function api(method, path, body, key) {
   const headers = {};
   if (body !== undefined) headers['content-type'] = 'application/json';
+  if (NATIVE) { headers['x-client'] = `native-android/${APP_BUILD}`; if (S.token) headers.authorization = `Bearer ${S.token}`; }
   if (method !== 'GET') {
     const k = key || uid();
     if (!intents.has(k)) intents.set(k, uid());
@@ -55,7 +64,7 @@ async function api(method, path, body, key) {
   }
   let r;
   try {
-    r = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: 'same-origin' });
+    r = await fetch(API_BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: NATIVE ? 'omit' : 'same-origin' });
   } catch {
     markOffline(true); // l'opération reste identifiable : un nouvel essai ne créera pas de doublon
     throw new ApiError(method === 'GET' ? 'Pas de connexion.' : 'Pas de connexion : rien n’a été enregistré. Réessaie.', 0, 'network');
@@ -64,6 +73,8 @@ async function api(method, path, body, key) {
   let j = null;
   try { j = await r.json(); } catch { /* corps vide */ }
   if (key) intents.delete(key); // réponse reçue : l'intention est réglée
+  if (r.status === 426) { S.upgrade = true; render(); throw new ApiError(j?.error || 'Mise à jour nécessaire', 426, 'upgrade_required'); }
+  if (NATIVE && j?.token) { S.token = j.token; await window.PHNative.setToken(j.token); }
   if (!r.ok) {
     if (r.status === 401 && S.me) { S.me = null; wipeLocal(); S.auth = { mode: 'login', error: '', info: 'Session terminée : reconnecte-toi.' }; go('#/'); render(); }
     throw new ApiError(j?.error || 'Erreur', r.status, j?.code);
@@ -170,7 +181,7 @@ const activeChallenges = (c) => S.st.challenges.filter((ch) => ch.childIds.inclu
 const nm = () => (S.offline ? ' needs-online' : '');
 
 // ---------- installation (PWA) ----------
-const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isStandalone = () => NATIVE || matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 function platform() {
   const ua = navigator.userAgent;
   if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return /CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(ua) ? 'ios-other' : 'ios';
@@ -178,7 +189,7 @@ function platform() {
   return 'other';
 }
 const installCard = () => isStandalone()
-  ? '<div class="card" style="text-align:center">✅ Application installée sur cet appareil</div>'
+  ? `<div class="card" style="text-align:center">✅ ${NATIVE ? `Application Android · version ${esc(APP_VERSION)} (build ${APP_BUILD})` : 'Application installée sur cet appareil'}</div>`
   : `<div class="card" style="background:var(--soft)"><div style="display:flex;gap:12px;align-items:center"><div style="font-size:2.2rem">📲</div>
       <div style="flex:1"><b>Installer l’application</b><div class="muted small">Icône sur l’écran d’accueil, plein écran</div></div></div>
       <button class="btn primary block" style="margin-top:10px" data-act="installApp">Installer l’application</button></div>`;
@@ -212,6 +223,7 @@ function toast(html, { undo, error } = {}) {
 // ---------- rendu : coque ----------
 function render() {
   const app = $('#app');
+  if (S.upgrade) { app.innerHTML = '<div class="auth"><div class="logo"><div class="e">⬆️</div><h1>Mise à jour nécessaire</h1></div><div class="card"><p>Cette version de Petits Héros est trop ancienne pour le serveur. Installe la dernière version de l’application, puis rouvre-la.</p><p class="muted small">Tes données sont conservées sur le serveur.</p></div></div>'; return; }
   if (S.me && S.recovery) { app.innerHTML = recoveryView(); return; }
   if (!S.me) { app.innerHTML = authView(); return; }
   const m = S.me.membership;
@@ -704,6 +716,12 @@ function pinSheet(setting) {
 }
 
 // ---------- actions ----------
+// Enregistre / partage un fichier : navigateur → téléchargement ; Android → feuille de partage (le WebView ne télécharge pas les blobs)
+async function saveFile(name, mime, text) {
+  if (NATIVE) { await window.PHNative.saveFile(name, mime, text); return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+  a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
 const errMsg = (e) => e.message || 'Erreur';
 async function run(fn) {
   if (S.busy) return;
@@ -764,11 +782,7 @@ const A = {
   // codes de secours
   copyRecovery: async () => { try { await navigator.clipboard.writeText(S.recovery.join('\n')); toast('Codes copiés'); } catch { toast('Copie impossible', { error: true }); } },
   copyRegen: async () => { try { await navigator.clipboard.writeText(S.sheet.codes.join('\n')); toast('Codes copiés'); } catch { toast('Copie impossible', { error: true }); } },
-  saveRecovery: () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([`Petits Héros — codes de secours (usage unique)\n${S.me.user.email}\n\n${S.recovery.join('\n')}\n`], { type: 'text/plain' }));
-    a.download = 'petits-heros-codes-secours.txt'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  },
+  saveRecovery: () => run(() => saveFile('petits-heros-codes-secours.txt', 'text/plain', `Petits Héros — codes de secours (usage unique)\n${S.me.user.email}\n\n${S.recovery.join('\n')}\n`)),
   ackToggle: () => { $('#ackBtn').disabled = !$('#ackRecovery').checked; },
   ackRecovery: async () => { if (!$('#ackRecovery').checked) return; S.recovery = null; await boot(); },
   recoveryRegen: () => openSheet({ kind: 'regen' }),
@@ -864,10 +878,9 @@ const A = {
   installHelp: () => openSheet({ kind: 'install' }),
   doInstall: async () => { const ev = S.installEvt; S.installEvt = null; closeSheet(); try { await ev?.prompt(); } catch { /* refusé par le navigateur */ } },
   exportData: () => run(async () => {
-    const r = await fetch('/api/family/export', { credentials: 'same-origin' });
+    const r = await fetch(API_BASE + '/api/family/export', { credentials: NATIVE ? 'omit' : 'same-origin', headers: NATIVE ? { authorization: `Bearer ${S.token}`, 'x-client': `native-android/${APP_BUILD}` } : {} });
     if (!r.ok) throw new Error('Export impossible');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(await r.blob());
-    a.download = `petits-heros-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    await saveFile(`petits-heros-${new Date().toISOString().slice(0, 10)}.json`, 'application/json', await r.text());
   }),
 };
 async function undoPost(path) {
@@ -945,6 +958,21 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.in
 window.addEventListener('appinstalled', () => { S.installEvt = null; if (!S.sheet) render(); toast('Application installée ✓'); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
 
+// bouton Retour Android : ferme d'abord la fenêtre ouverte, remonte d'un niveau, puis quitte à la racine
+function handleBack() {
+  if (S.sheet) { closeSheet(); return; }
+  if (S.me && S.recovery) return; // codes de secours : il faut les valider
+  if (!S.me) { if (S.auth.mode !== 'login') { S.auth = { mode: 'login', error: '', info: '' }; render(); } else window.PHNative.exit(); return; }
+  if (!S.me.membership || S.me.membership.status !== 'active') { window.PHNative.exit(); return; }
+  const r = route();
+  if (r.a === 'library') { go('#/family'); return; }
+  if (r.a !== 'children') { go('#/children'); return; }
+  window.PHNative.exit();
+}
+if (NATIVE) {
+  window.PHNative.onBack(handleBack);
+  window.PHNative.onResume(() => { if (S.st) refresh(); else boot(); });
+}
 // clavier mobile : la fenêtre suit la zone réellement visible et le champ actif reste visible
 if (window.visualViewport) {
   const vv = () => document.documentElement.style.setProperty('--vvh', `${Math.round(visualViewport.height)}px`);
@@ -956,5 +984,5 @@ document.addEventListener('focusin', (e) => {
 // retour arrière après déconnexion : jamais d'affichage depuis le cache de navigation
 window.addEventListener('pageshow', (e) => { if (e.persisted) boot(); });
 document.body.classList.toggle('noanim', !S.prefs.anim);
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-boot();
+if ('serviceWorker' in navigator && !NATIVE) navigator.serviceWorker.register('/sw.js').catch(() => {});
+(async () => { if (NATIVE) S.token = (await window.PHNative.getToken()) || ''; boot(); })();

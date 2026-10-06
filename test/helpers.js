@@ -17,11 +17,13 @@ export async function startServer() {
 }
 
 export class Client {
-  constructor(base) { this.base = base; this.cookie = ''; }
+  constructor(base) { this.base = base; this.cookie = ''; this.token = ''; this.headers = {}; }
   async req(method, path, body, { op, headers = {} } = {}) {
     const h = { ...headers };
     if (body !== undefined) h['content-type'] = 'application/json';
     if (this.cookie) h.cookie = this.cookie;
+    if (this.token) h.authorization = `Bearer ${this.token}`;
+    Object.assign(h, this.headers);
     if (method !== 'GET') h['x-op-id'] = op || crypto.randomUUID();
     const r = await fetch(this.base + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
     const sc = r.headers.getSetCookie?.() || [];
@@ -31,7 +33,7 @@ export class Client {
     }
     let json = null;
     try { json = await r.json(); } catch {}
-    return { status: r.status, body: json };
+    return { status: r.status, body: json, headers: r.headers };
   }
   get(p) { return this.req('GET', p); }
   post(p, b = {}, o) { return this.req('POST', p, b, o); }

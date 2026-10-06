@@ -1,0 +1,136 @@
+name: Android APK
+
+# 1) « Compilation de contrôle » : à chaque modification de l'application Android, sans aucun secret.
+#    Elle prouve que le projet compile ; l'APK produit (signé avec une clé de débogage) n'est PAS publié.
+# 2) « APK signé » : à la demande (Actions > Android APK > Run workflow) ou sur un tag android-v*.
+#    Exige les 5 secrets de signature (voir docs/ANDROID.md), refuse de continuer s'il en manque un,
+#    vérifie que l'APK est signé par LA bonne clé (empreinte ANDROID_CERT_SHA256) puis le publie dans une Release.
+on:
+  push:
+    branches: [claude/petits-heros-app-cukdzu, main]
+    paths: ['android/**', 'native/**', 'public/**', 'scripts/build-www.mjs', 'capacitor.config.json', 'package.json', 'package-lock.json', '.github/workflows/android.yml']
+    tags: ['android-v*']
+  workflow_dispatch:
+    inputs:
+      api_base:
+        description: "URL HTTPS du serveur Railway embarquée dans l'application"
+        default: 'https://petits-heros-production.up.railway.app'
+      publish:
+        description: 'Publier une Release GitHub avec l’APK signé'
+        type: boolean
+        default: true
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PH_API_BASE: ${{ inputs.api_base || 'https://petits-heros-production.up.railway.app' }}
+
+jobs:
+  compile-check:
+    name: Compilation de contrôle (sans signature)
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Interface embarquée + synchronisation Capacitor
+        run: npm run android:web
+      - name: Compiler (assembleDebug)
+        working-directory: android
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Résultat
+        run: |
+          ls -l android/app/build/outputs/apk/debug/*.apk
+          echo "### Compilation OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "APK de contrôle signé avec une clé de débogage : **ne pas l'installer** (il ne pourrait pas être remplacé par la version signée)." >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: APK signé
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/android-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write   # création de la Release
+    steps:
+      - name: Vérifier que les secrets de signature existent
+        env:
+          A: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          B: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          C: ${{ secrets.ANDROID_KEY_ALIAS }}
+          D: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          E: ${{ secrets.ANDROID_CERT_SHA256 }}
+        run: |
+          missing=""
+          [ -n "$A" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -n "$B" ] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -n "$C" ] || missing="$missing ANDROID_KEY_ALIAS"
+          [ -n "$D" ] || missing="$missing ANDROID_KEY_PASSWORD"
+          [ -n "$E" ] || missing="$missing ANDROID_CERT_SHA256"
+          if [ -n "$missing" ]; then
+            echo "::error title=Secrets de signature manquants::Créez dans Settings > Secrets and variables > Actions :$missing (voir docs/ANDROID.md, étape 1). Aucun APK n'est produit sans la clé de signature."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Numéro de version (doit augmenter à chaque APK)
+        run: |
+          echo "VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$(( ${{ github.run_number }} + ${{ vars.ANDROID_VERSION_CODE_OFFSET || 0 }} ))" >> "$GITHUB_ENV"
+      - name: Interface embarquée + synchronisation Capacitor
+        run: npm run android:web
+      - name: Restaurer la clé de signature (fichier temporaire, jamais publié)
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          echo "PH_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+      - name: Compiler et signer (assembleRelease)
+        working-directory: android
+        env:
+          PH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          PH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+      - name: Vérifier signature, identité et version
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
+          EXPECTED_VERSION_CODE: ${{ env.VERSION_CODE }}
+        run: |
+          APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          echo "APK : $APK"
+          sh android/scripts/verify-apk.sh "$APK"
+          mkdir -p dist
+          cp "$APK" "dist/petits-heros-${VERSION_NAME}-build${VERSION_CODE}.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Supprimer la clé du disque
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: petits-heros-apk-${{ env.VERSION_CODE }}
+          path: dist/
+          retention-days: 90
+      - name: Publier la Release GitHub
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="android-build-${VERSION_CODE}"
+          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt --target "$GITHUB_SHA" \
+            --title "Petits Héros ${VERSION_NAME} (build ${VERSION_CODE})" \
+            --notes "APK Android signé. Serveur : ${PH_API_BASE}. Installer : télécharger le .apk sur le téléphone et l'ouvrir (autoriser « installer des applications inconnues » pour le navigateur). Mise à jour : installer le nouvel APK par-dessus (même clé de signature)."
+          echo "### APK publié" >> "$GITHUB_STEP_SUMMARY"
+          echo "Release : $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

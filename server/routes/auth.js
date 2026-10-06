@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { HttpError, wrap, str, hit, bad } from '../util.js';
 import {
   hashPassword, verifyPassword, checkPasswordStrength, createSession, setSessionCookie,
-  clearSessionCookie, requireUser, randomToken, sha256, randomCode, normalizeCode, prettyCode,
+  clearSessionCookie, requireUser, randomToken, sha256, randomCode, normalizeCode, prettyCode, startSession,
 } from '../auth.js';
 import { seedFamily } from '../seed.js';
 import { sendMail, mailEnabled } from '../mail.js';
@@ -51,9 +51,9 @@ authRouter.post('/register', wrap(async (req, res) => {
     recoveryCodes = await issueRecoveryCodes(c, u.id);
     return u.id;
   });
-  setSessionCookie(res, await createSession(userId), config.isProd);
+  const s = await startSession(req, res, userId);
   // Les codes de secours ne sont affichés qu'ici, une seule fois.
-  res.status(201).json({ ok: true, recoveryCodes });
+  res.status(201).json({ ok: true, recoveryCodes, ...s });
 }));
 
 authRouter.post('/login', wrap(async (req, res) => {
@@ -64,8 +64,7 @@ authRouter.post('/login', wrap(async (req, res) => {
   const u = (await query('SELECT id, password_hash FROM users WHERE lower(email)=$1', [em])).rows[0];
   const ok = await verifyPassword(String(b.password || ''), u?.password_hash);
   if (!u || !ok) throw new HttpError(401, 'E-mail ou mot de passe incorrect', 'bad_credentials');
-  setSessionCookie(res, await createSession(u.id), config.isProd);
-  res.json({ ok: true });
+  res.json({ ok: true, ...(await startSession(req, res, u.id)) });
 }));
 
 authRouter.post('/logout', wrap(async (req, res) => {
