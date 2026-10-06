@@ -16,26 +16,30 @@
 | Fichiers | Export JSON et codes de secours : feuille de partage Android (le WebView ne télécharge pas les blobs) |
 | Mises à jour | L'interface est dans l'APK : une évolution de l'interface = nouvel APK. L'API reste compatible ; `MIN_NATIVE_BUILD` (variable Railway) force une mise à jour (écran « Mise à jour nécessaire ») si un jour l'API devient incompatible |
 
-## Étape 1 — Créer la clé de signature (une seule fois, sur votre ordinateur)
+## Étape 1 — Créer la clé de signature (parcours sans ordinateur, une seule fois)
 
-La clé **est** l'identité de l'application : toute mise à jour doit être signée par la même clé, sinon Android refuse de remplacer l'application (il faudrait la désinstaller). Elle ne doit **jamais** être publiée ni dans GitHub, ni dans un message.
+La clé **est** l'identité de l'application : toute mise à jour doit être signée par la même clé, sinon Android refuse de remplacer l'application. Elle est générée **dans GitHub Actions** (jamais dans la conversation ni dans un journal), enregistrée dans les **secrets Actions** du dépôt, et sauvegardée **chiffrée**. Le dépôt est public : aucune clé, même chiffrée, n'est commitée.
 
-```bash
-# Java (JDK 17 ou 21) requis pour keytool
-sh android/scripts/generate-keystore.sh          # crée ~/petits-heros-signing/
-```
-Le script affiche l'**empreinte SHA-256** et crée `~/petits-heros-signing/github-secrets.txt` avec les valeurs à copier. Puis :
+**A. Jeton temporaire (nécessaire parce que GitHub interdit à un workflow d'écrire des secrets sans jeton dédié)**
+1. GitHub → photo de profil → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. Nom : `petits-heros-bootstrap` ; **Expiration : 7 jours** ; **Repository access : Only select repositories → `Kids`** ; **Repository permissions → Secrets : Read and write** (Metadata : Read-only s'ajoute seul) ; rien d'autre.
+3. **Generate token**, copier la valeur (elle n'est montrée qu'une fois ; ne l'envoyez à personne).
+4. Dépôt `Kids` → **Settings → Secrets and variables → Actions → New repository secret** : nom `BOOTSTRAP_TOKEN`, valeur = le jeton.
 
-1. GitHub → dépôt → **Settings → Secrets and variables → Actions → New repository secret**, créer **5 secrets** (noms exacts) :
-   `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_CERT_SHA256`.
-2. **Supprimer** `github-secrets.txt`. Sauvegarder `petits-heros-release.p12` **et** son mot de passe à deux endroits sûrs (gestionnaire de mots de passe + disque externe). **Perdre la clé = ne plus pouvoir mettre à jour l'application.**
-3. Dans GitHub : Settings → Actions → General : *Allow all actions* (ou au minimum `actions/*` et `gradle/actions/*`) et **Workflow permissions : Read and write** (pour publier la Release).
+**B. Phrase secrète de sauvegarde**
+Choisir une phrase d'au moins 20 caractères et la noter **d'abord** dans votre gestionnaire de mots de passe, puis créer le secret `ANDROID_BACKUP_PASSPHRASE` (même écran) avec cette phrase.
 
-Pas d'ordinateur avec Java ? Utilisez GitHub Codespaces (terminal sur le dépôt) ou tout PC emprunté ; la clé n'est jamais stockée par GitHub autrement que dans les secrets chiffrés.
+**C. Lancement** (je peux le faire pour vous, ou vous-même : Actions → *Android signing bootstrap* → Run workflow → saisir `CREER`). Le workflow : génère la clé, crée les 5 secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_CERT_SHA256`) sans rien afficher, **refuse d'écraser** une clé existante, produit une sauvegarde chiffrée (AES-256, vérifiée par déchiffrement) et la publie comme artefact `sauvegarde-cle-signature-CHIFFREE` valable **24 h**.
+
+**D. Après le workflow**
+1. Télécharger l'artefact (page du run → *Artifacts*) et le ranger **avec** la phrase secrète, à **deux endroits distincts** (gestionnaire de mots de passe + disque/clé USB). Restauration : `android/RESTORE-SIGNING.md`. Les secrets GitHub ne peuvent pas être relus : cette sauvegarde est le seul moyen de retrouver la clé si le dépôt disparaît.
+2. **Révoquer le jeton** (Developer settings → le jeton → Delete) et supprimer le secret `BOOTSTRAP_TOKEN`. Les builds suivants n'en ont pas besoin.
+
+*(Variante avec ordinateur : `sh android/scripts/generate-keystore.sh`, puis créer les 5 secrets à la main.)*
 
 ## Étape 2 — Fabriquer l'APK signé
 
-GitHub → **Actions → Android APK → Run workflow** (branche `claude/petits-heros-app-cukdzu`, laisser « publier » coché). Le workflow :
+GitHub → **Actions → Android APK → Run workflow** (branche `claude/petits-heros-app-cukdzu`, **mode : release**, « publier » coché). Le mode **dry-run** fait le même parcours avec une clé jetable (rien n'est publié) : utile pour contrôler la chaîne. Le workflow :
 
 1. refuse de démarrer s'il manque un secret (message explicite) ;
 2. construit l'interface, synchronise Capacitor, compile `assembleRelease`, signe avec votre clé ;
@@ -81,5 +85,6 @@ Icônes : `npm run android:icons` (Playwright requis ; les PNG sont versionnés)
 | Génération de la clé, extraction de l'empreinte, vérification d'APK (signature/identité/version, cas d'échec) | **Testé en local** (avec un faux `apksigner`/`aapt2`) |
 | Synchronisation Capacitor (`cap sync`), YAML du workflow | **Exécuté / validé** |
 | **Compilation Gradle de l'APK** | **Réussie sur GitHub Actions** (workflow « Compilation de contrôle », run n° 1, commit `7bebc6a`, `assembleDebug` en 1 min 40 s, APK de contrôle produit — signé avec une clé de débogage, non publié). Non exécutable dans mon propre environnement. |
-| APK signé | **Pas encore produit** (nécessite l'étape 1) |
+| **Chaîne de signature complète sur GitHub avec les vrais `apksigner`/`aapt2`** | **Exécutée avec succès en mode dry-run** (run n° 3, clé jetable détruite, contre-épreuve : une mauvaise empreinte est refusée) |
+| APK signé avec la clé définitive | **Pas encore produit** (nécessite l'étape 1) |
 | Installation, icône, Retour, clavier, zones de sécurité, partage de fichier, reprise sur un **vrai téléphone Android** | **Non testé** — à faire après installation (liste dans le bilan) |
