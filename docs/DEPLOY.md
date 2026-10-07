@@ -22,7 +22,7 @@ Dans le tableau de bord Railway, regardez si vous avez déjà un projet avec un 
 | `NODE_ENV` | `production` (cookies `Secure`, HSTS) | ✅ |
 | `APP_URL` | `https://<domaine-généré>.up.railway.app` (après *Settings → Networking → Generate Domain*, puis redéployer si vous le saisissez après) | recommandé |
 | `APP_TZ` | `Europe/Paris` (défaut identique) | non |
-| `RESEND_API_KEY`, `MAIL_FROM` | e-mails de récupération (facultatif, voir §6) | non |
+| `BREVO_API_KEY` (secrète), `BREVO_FROM_EMAIL`, `BREVO_FROM_NAME` | e-mails de récupération via l'API HTTPS Brevo (voir §6) | non |
 | `PORT` | **fourni par Railway**, ne pas définir | — |
 | `TEST_DATABASE_URL` | **ne jamais** définir sur Railway (réservé aux tests locaux) | — |
 
@@ -83,7 +83,10 @@ DATABASE_URL=postgres://…/restore_test sh scripts/restore.sh fichier.dump   # 
 
 * **Codes de secours** (par défaut, sans service externe) : 8 codes à usage unique, hachés en base, affichés **une seule fois** et **obligatoirement** à la création de chaque compte (le propriétaire comme les autres parents). *Mot de passe oublié → J'ai un code de secours* : e-mail + code + nouveau mot de passe ; toutes les sessions sont fermées. Régénérables (avec le mot de passe) dans *Famille → Codes de secours* ; une bannière avertit s'il n'en reste aucun. Limité à 5 essais/semaine par e-mail et 10 par IP.
 * **Code du propriétaire** pour un autre parent : *Famille → ⋯ → Générer un code*.
-* **E-mail** (facultatif) : service externe **Resend** (quotas gratuits à vérifier), variables `RESEND_API_KEY`, `MAIL_FROM` (domaine vérifié) et `APP_URL`. *Non testé contre l'API réelle.*
+* **E-mail** (Brevo, API HTTPS `POST /v3/smtp/email`, pas de SMTP) : variables `BREVO_API_KEY` (secrète), `BREVO_FROM_EMAIL` (expéditeur **validé chez Brevo**), `BREVO_FROM_NAME`, plus `APP_URL` (sinon le domaine public Railway est utilisé ; jamais l'en-tête Host).
+  * Lien de récupération : valable **1 h**, **usage unique**, **un seul lien valide à la fois**, jeton haché en base, placé dans le fragment `#/reset/…` ; demandes limitées (**3/h par adresse, 5/h par IP**) ; réponse identique que le compte existe ou non ; envoi en arrière-plan avec **délai maximal** (10 s, `MAIL_TIMEOUT_MS`).
+  * Journaux : jamais la clé, le lien, le jeton ni l'adresse. Succès journalisé seulement si Brevo **accepte** (HTTP 2xx + `messageId`) — c'est une acceptation, **pas une confirmation de réception** ; vérifier la livraison dans Brevo › Transactional › Logs. Échec certain (refus, réseau) : lien invalidé ; issue inconnue (délai dépassé) : message d'erreur journalisé, lien conservé jusqu'à expiration.
+  * `/healthz` indique `"mail":"brevo"|"off"` et le commit déployé (`RAILWAY_GIT_COMMIT_SHA`) : permet de vérifier que Railway a pris en compte les variables et la bonne version.
 * Perte de **tous** les codes et du mot de passe du propriétaire sans e-mail configuré : pas de récupération en libre-service (volontairement : c'est ce qui protège le compte).
 
 ## 7. Coûts : surveiller

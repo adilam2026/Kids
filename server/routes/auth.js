@@ -7,7 +7,7 @@ import {
   clearSessionCookie, requireUser, randomToken, sha256, randomCode, normalizeCode, prettyCode, startSession,
 } from '../auth.js';
 import { seedFamily } from '../seed.js';
-import { sendMail, mailEnabled } from '../mail.js';
+import { sendMail, mailEnabled, describeMailError } from '../mail.js';
 
 export const authRouter = Router();
 const WEEK = 15 * 60 * 1000;
@@ -103,21 +103,46 @@ authRouter.post('/change-password', requireUser, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Récupération : e-mail (si service configuré). Réponse identique que le compte existe ou non.
+// ---- Récupération par e-mail (Brevo) ----
+// Sécurité : lien à usage unique et expirant (1 h, jeton haché en base), un seul lien valide à la fois, demandes limitées par IP ET par adresse,
+// réponse strictement identique que le compte existe ou non (l'envoi se fait en arrière-plan : même durée), aucune clé ni aucun lien dans les journaux.
+const pendingMail = new Set();
+export const drainMail = () => Promise.allSettled([...pendingMail]);   // utilisé par les tests
+
+async function deliverReset(to, token) {
+  const link = `${config.appUrl}/#/reset/${token}`;   // le jeton est dans le fragment : jamais envoyé dans une requête HTTP ni dans les journaux du serveur
+  try {
+    const r = await sendMail({
+      to, subject: 'Petits Héros — nouveau mot de passe',
+      text: `Bonjour,\n\nPour choisir un nouveau mot de passe (lien valable 1 heure, utilisable une seule fois) :\n${link}\n\nSi tu n’es pas à l’origine de cette demande, ignore ce message : ton mot de passe actuel reste valable.\n\nPetits Héros`,
+      html: `<p>Bonjour,</p><p>Pour choisir un nouveau mot de passe (lien valable 1 heure, utilisable une seule fois) :</p><p><a href="${link}">Choisir un nouveau mot de passe</a></p><p>Si tu n’es pas à l’origine de cette demande, ignore ce message : ton mot de passe actuel reste valable.</p><p>Petits Héros</p>`,
+    });
+    console.log(`mail: récupération acceptée par Brevo (messageId ${r.messageId})`);   // « accepté » = HTTP 2xx + messageId ; la réception n'est pas confirmée par ce journal
+  } catch (e) {
+    console.error(`mail: échec de l’envoi de récupération (${describeMailError(e)})${e.kind === 'timeout' || e.kind === 'unconfirmed' ? ' — issue inconnue, le lien reste valable' : ''}`);
+    // échec certain (refus Brevo, réseau, configuration) : le lien n'a pas été remis, on l'invalide ; issue inconnue : on le laisse expirer
+    if (!['timeout', 'unconfirmed'].includes(e.kind)) await query('UPDATE password_resets SET used_at = now() WHERE token_hash=$1 AND used_at IS NULL', [sha256(token)]).catch(() => {});
+  }
+}
+
 authRouter.post('/forgot', wrap(async (req, res) => {
-  hit(`forgot:${req.ip}`, 5, 3600_000);
+  hit(`forgot:ip:${req.ip}`, 5, 3600_000);
   const em = email(req.body?.email);
+  hit(`forgot:em:${em}`, 3, 3600_000);
   const u = (await query('SELECT id FROM users WHERE lower(email)=$1', [em])).rows[0];
   if (u && mailEnabled()) {
-    const token = randomToken(24);
-    await query(`INSERT INTO password_resets(user_id, token_hash, expires_at) VALUES ($1,$2, now() + interval '1 hour')`, [u.id, sha256(token)]);
-    try {
-      await sendMail({
-        to: em, subject: 'Petits Héros — nouveau mot de passe',
-        text: `Pour choisir un nouveau mot de passe (valable 1 heure) :\n${config.appUrl}/#/reset/${token}\n\nSi tu n’es pas à l’origine de cette demande, ignore ce message.`,
+    if (!config.appUrl) console.error('mail: APP_URL (ou domaine public Railway) manquant : e-mail de récupération non envoyé');
+    else {
+      const token = randomToken(24);
+      await withTx(async (c) => {
+        await c.query('UPDATE password_resets SET used_at = now() WHERE user_id=$1 AND used_at IS NULL', [u.id]); // un seul lien valide à la fois
+        await c.query(`INSERT INTO password_resets(user_id, token_hash, expires_at) VALUES ($1,$2, now() + interval '1 hour')`, [u.id, sha256(token)]);
       });
-    } catch (e) { console.error('mail:', e.message); }
+      const job = deliverReset(em, token).finally(() => pendingMail.delete(job));
+      pendingMail.add(job);
+    }
   }
+  // Même réponse dans tous les cas. Aucune promesse de livraison : « si un compte correspond ».
   res.json({ ok: true, mailEnabled: mailEnabled() });
 }));
 

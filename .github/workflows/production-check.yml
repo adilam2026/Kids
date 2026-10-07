@@ -1,0 +1,71 @@
+name: Production check
+
+# Vérifie le serveur déployé sur Railway (depuis un runner GitHub, qui a accès à Internet) :
+#  1. attend que la nouvelle version soit en ligne (/healthz expose le commit déployé et l'état de la configuration mail) ;
+#  2. contrôles non destructifs (scripts/check-deploy.sh) ;
+#  3. (facultatif) déclenche un e-mail de récupération de mot de passe pour une adresse donnée.
+# Rien de secret ici : la clé Brevo n'existe que dans les variables du service Railway.
+on:
+  workflow_dispatch:
+    inputs:
+      expect_commit:
+        description: 'Commit attendu en production (7 premiers caractères) ; vide = seulement la présence de la fonctionnalité mail'
+        required: false
+        default: ''
+      wait_minutes:
+        description: "Attente maximale du déploiement (minutes)"
+        required: false
+        default: '15'
+      send_reset_to:
+        description: "Adresse pour laquelle déclencher un e-mail de récupération (facultatif ; jamais affichée dans les journaux)"
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  BASE_URL: https://petits-heros-production.up.railway.app
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attendre la version attendue en production
+        env:
+          EXPECT: ${{ inputs.expect_commit }}
+          WAIT: ${{ inputs.wait_minutes }}
+        run: |
+          deadline=$(( $(date +%s) + ${WAIT:-15} * 60 ))
+          while :; do
+            body=$(curl -sS -m 15 "$BASE_URL/healthz" 2>/dev/null || true)
+            code=$(curl -sS -m 15 -o /dev/null -w '%{http_code}' "$BASE_URL/healthz" 2>/dev/null || echo 000)
+            commit=$(echo "$body" | jq -r '.commit // empty' 2>/dev/null || true)
+            mail=$(echo "$body" | jq -r '.mail // empty' 2>/dev/null || true)
+            echo "healthz: HTTP $code, commit='${commit}', mail='${mail}'"
+            if [ "$code" = 200 ] && [ -n "$mail" ] && { [ -z "$EXPECT" ] || [ "${commit#"$EXPECT"}" != "$commit" ] || [ "${EXPECT#"$commit"}" != "$EXPECT" -a -n "$commit" ]; }; then echo "version attendue en ligne"; break; fi
+            [ "$(date +%s)" -lt "$deadline" ] || { echo "::error title=Déploiement non constaté::la version attendue n'est pas en ligne après ${WAIT:-15} min (dernier état : HTTP $code, commit '${commit}', mail '${mail}')"; exit 1; }
+            sleep 20
+          done
+          echo "COMMIT_EN_LIGNE=$commit" >> "$GITHUB_ENV"
+      - name: Contrôles du déploiement (non destructifs)
+        run: sh scripts/check-deploy.sh "$BASE_URL"
+      - name: Configuration e-mail prise en compte
+        run: |
+          mail=$(curl -sS -m 15 "$BASE_URL/healthz" | jq -r '.mail')
+          echo "mail = $mail"
+          [ "$mail" = brevo ] || { echo "::error title=E-mail non configuré::/healthz indique mail='$mail' : les variables BREVO_API_KEY et BREVO_FROM_EMAIL ne sont pas (encore) prises en compte par le service Railway (un redéploiement est nécessaire après leur ajout)."; exit 1; }
+      - name: Déclencher l'e-mail de récupération (facultatif)
+        run: |
+          # l'adresse est lue dans la charge de l'événement (jamais dans le texte du script) et masquée AVANT tout usage
+          TARGET=$(jq -r '.inputs.send_reset_to // ""' "$GITHUB_EVENT_PATH")
+          [ -n "$TARGET" ] || { echo "aucune adresse demandée : étape ignorée"; exit 0; }
+          echo "::add-mask::$TARGET"
+          echo "$TARGET" | grep -Eq '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' || { echo "::error::adresse invalide"; exit 1; }
+          code=$(jq -n --arg e "$TARGET" '{email:$e}' | curl -sS -m 30 -o /tmp/forgot.json -w '%{http_code}' -H 'content-type: application/json' --data @- "$BASE_URL/api/auth/forgot")
+          echo "POST /api/auth/forgot -> HTTP $code, réponse : $(cat /tmp/forgot.json)"
+          [ "$code" = 200 ] || { echo "::error::le serveur n'a pas accepté la demande (HTTP $code)"; exit 1; }
+          echo "demande acceptée par le serveur (réponse volontairement identique que le compte existe ou non). La réception N'EST PAS confirmée ici."
+          rm -f /tmp/forgot.json

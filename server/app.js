@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { query } from './db.js';
 import { HttpError, wrap } from './util.js';
 import { loadAuth, isNativeClient } from './auth.js';
+import { mailEnabled } from './mail.js';
 import { authRouter } from './routes/auth.js';
 import { familyRouter } from './routes/family.js';
 import { dataRouter, META } from './routes/data.js';
@@ -35,7 +36,7 @@ export function createApp() {
       const applied = (await query('SELECT count(*) AS n FROM schema_migrations')).rows[0].n;
       const expected = fs.readdirSync(path.join(pub, '..', 'migrations')).filter((f) => f.endsWith('.sql')).length;
       if (applied < expected) return res.status(503).json({ ok: false, db: true, migrations: `${applied}/${expected}` });
-      res.set('Cache-Control', 'no-store').json({ ok: true, db: true, migrations: applied });
+      res.set('Cache-Control', 'no-store').json({ ok: true, db: true, migrations: applied, commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || undefined, mail: mailEnabled() ? 'brevo' : 'off' });
     } catch { res.status(503).json({ ok: false, db: false }); }
   });
 
