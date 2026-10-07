@@ -24,7 +24,7 @@ echo "$M" | grep -q 'package="fr.petitsheros.app"' || fail "identité ≠ fr.pet
 echo "$M" | grep -q "android:versionCode=\"$EXPECTED_VERSION_CODE\"" || fail "versionCode ≠ $EXPECTED_VERSION_CODE"
 echo "$M" | grep -q 'android:targetSdkVersion="36"' || fail "targetSdk ≠ 36"
 echo "$M" | grep -q 'android:debuggable' && fail "l'application est marquée débogable"
-PERMS="$(echo "$M" | sed -n 's/.*<uses-permission[^>]*android:name="\([^"]*\)".*/\1/p' | sort -u | tr '\n' ' ')"
+PERMS="$(echo "$M" | sed -n 's/.*<uses-permission[^>]*android:name="\([^"]*\)".*/\1/p' | grep -v '^fr\.petitsheros\.app\.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION$' | sort -u | tr '\n' ' ')"   # cette permission interne (propre à l'application, ajoutée par AndroidX) n'est pas une permission d'accès
 [ "$PERMS" = "android.permission.INTERNET " ] || fail "permissions inattendues : $PERMS"
 echo "manifeste OK : fr.petitsheros.app, versionCode $EXPECTED_VERSION_CODE, targetSdk 36, non débogable, permissions : $PERMS"
 # 3. contenu embarqué (fonctions annoncées réellement présentes)

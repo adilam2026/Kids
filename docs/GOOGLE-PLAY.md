@@ -10,7 +10,7 @@
 - « Nommer propriétaire », historique « Ancien parent », pages légales sans balise non remplacée ni secret.
 - Toute la suite existante (API 60 tests, parcours navigateur, interface Android embarquée émulée, réseau lent, cartes, sons, « Point non validé »).
 - Fiche : longueurs imposées par Google, fonctions annoncées présentes dans le code, aucune permission autre qu `INTERNET`, aucune bibliothèque de publicité / mesure d’audience / achat (`test/store.test.js`).
-- Chaîne de build AAB sur GitHub Actions (clé définitive depuis les secrets) : `bundleRelease`, `jarsigner` + empreinte SHA-256 du certificat, `bundletool validate`, manifeste (identité `fr.petitsheros.app`, versionCode, targetSdk 36, non débogable, permission INTERNET seule), contenu embarqué (suppression de compte, « Nommer propriétaire », « Point non validé », texte de récupération par e-mail, adresse du serveur).
+- Chaîne de build AAB sur GitHub Actions (clé définitive depuis les secrets) : `bundleRelease`, `jarsigner` + empreinte SHA-256 du certificat, `bundletool validate`, manifeste (identité `fr.petitsheros.app`, versionCode, targetSdk 36, non débogable, permission d’accès INTERNET seule (plus la permission interne `…DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` ajoutée automatiquement par AndroidX, propre à l’application et sans accès)), contenu embarqué (suppression de compte, « Nommer propriétaire », « Point non validé », texte de récupération par e-mail, adresse du serveur).
 
 **À vérifier sur votre téléphone** (non testable ici)
 - Les liens « Politique de confidentialité » / « Suppression de compte » s’ouvrent dans le navigateur du téléphone (et non dans l’application).
