@@ -9,6 +9,10 @@ has assets/public/app.js "J’ai un code d’invitation"     # rejoindre une fam
 has assets/public/app.js 'data-form="join"'
 has assets/public/app.js 'data-form="joincode"'
 has assets/public/app.js "Enregistrement…"                 # état d'envoi
+has assets/public/app.js "Supprimer mon compte"
+has assets/public/app.js "Nommer propriétaire"
+has assets/public/app.js "Point non validé"
+has assets/public/app.js "l’envoi d’e-mails n’est pas configuré"
 has assets/public/index.html native-bridge.js
 has assets/public/config.js "https://petits-heros-production.up.railway.app"
 echo "contenu embarqué OK"

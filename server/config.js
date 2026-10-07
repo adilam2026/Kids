@@ -8,6 +8,9 @@ export const config = {
     const u = process.env.APP_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '');
     return u.replace(/\/$/, '');
   },
+  // Identité affichée dans les pages légales (modifiable sans toucher au code).
+  get contactEmail() { return process.env.CONTACT_EMAIL || 'adilam.pro@gmail.com'; },
+  get publisherName() { return process.env.PUBLISHER_NAME || 'Petits Héros (éditeur indépendant)'; },
   get timezone() { return process.env.APP_TZ || 'Europe/Paris'; },
   get brevoKey() { return process.env.BREVO_API_KEY || ''; },
   get brevoFromEmail() { return process.env.BREVO_FROM_EMAIL || ''; },

@@ -8,6 +8,7 @@ import {
 } from '../auth.js';
 import { seedFamily } from '../seed.js';
 import { sendMail, mailEnabled, describeMailError } from '../mail.js';
+import { deleteAccount, accountSituation } from '../account.js';
 
 export const authRouter = Router();
 const WEEK = 15 * 60 * 1000;
@@ -191,4 +192,34 @@ authRouter.post('/recover', wrap(async (req, res) => {
     await c.query('DELETE FROM sessions WHERE user_id=$1', [u.id]);
   });
   res.json({ ok: true });
+}));
+
+// ---- Suppression de compte (exigence Google Play : dans l'application ET par une page web publique) ----
+// Vérification : mot de passe + mot « SUPPRIMER » saisi. Conséquences : voir server/account.js.
+async function runDeletion(userId, password, body) {
+  if (String(body?.confirm || '').trim().toUpperCase() !== 'SUPPRIMER') throw new HttpError(400, 'Écris SUPPRIMER pour confirmer.', 'confirm_required');
+  const u = (await query('SELECT password_hash FROM users WHERE id=$1', [userId])).rows[0];
+  if (!u || !(await verifyPassword(String(password || ''), u.password_hash))) throw new HttpError(403, 'Mot de passe incorrect', 'bad_password');
+  return withTx((c) => deleteAccount(c, userId, { deleteFamily: body?.deleteFamily === true }));
+}
+authRouter.get('/account-situation', requireUser, wrap(async (req, res) => {
+  res.json({ ok: true, ...(await accountSituation({ query }, req.user.id)) });
+}));
+authRouter.post('/delete-account', requireUser, wrap(async (req, res) => {
+  hit(`delacc:u:${req.user.id}`, 5, WEEK); hit(`delacc:ip:${req.ip}`, 20, WEEK);
+  const out = await runDeletion(req.user.id, req.body?.password, req.body);
+  clearSessionCookie(res, config.isProd);
+  res.set('Clear-Site-Data', '"cache"');
+  res.json({ ok: true, ...out });
+}));
+// Page web publique : même opération, avec e-mail + mot de passe (sans session). Réponse d'échec identique si le compte n'existe pas.
+authRouter.post('/delete-account-public', wrap(async (req, res) => {
+  const em = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  hit(`delacc:pub:ip:${req.ip}`, 10, WEEK); hit(`delacc:pub:em:${em}`, 5, WEEK);
+  if (String(req.body?.confirm || '').trim().toUpperCase() !== 'SUPPRIMER') throw new HttpError(400, 'Écris SUPPRIMER pour confirmer.', 'confirm_required');
+  const u = (await query('SELECT id, password_hash FROM users WHERE lower(email)=$1', [em])).rows[0];
+  const ok = await verifyPassword(String(req.body?.password || ''), u?.password_hash);
+  if (!u || !ok) throw new HttpError(401, 'E-mail ou mot de passe incorrect', 'bad_credentials');
+  const out = await withTx((c) => deleteAccount(c, u.id, { deleteFamily: req.body?.deleteFamily === true }));
+  res.json({ ok: true, ...out });
 }));

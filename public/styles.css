@@ -102,6 +102,7 @@ h1, h2, h3 { margin: 0; line-height: 1.15; }
 .val.p { color: #1f9a7c; } .val.n { color: var(--rose); }
 .confirm-bar { position: sticky; bottom: -8px; padding-top: 10px; background: linear-gradient(transparent, var(--bg) 30%); }
 .err { background: var(--rose-bg); color: #9d3347; border-radius: 16px; padding: 10px 14px; margin: 10px 0; font-weight: 600; font-size: .92rem; }
+.warn { background: #fff4e0; color: #7a4a00; border-radius: 16px; padding: 10px 14px; margin: 10px 0; font-size: .92rem; }
 .ok { background: #E3F7F0; color: #176b55; border-radius: 16px; padding: 10px 14px; margin: 10px 0; font-weight: 600; font-size: .92rem; }
 .stepper { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 10px 0; }
 .stepper button { width: 48px; height: 48px; border-radius: 50%; background: #fff; font-size: 1.5rem; font-weight: 900; box-shadow: var(--shadow); }

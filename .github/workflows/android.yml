@@ -123,7 +123,7 @@ jobs:
         run: |
           set -a; . "$RUNNER_TEMP/throwaway/signing.env"; set +a
           export PH_KEYSTORE_FILE="$RUNNER_TEMP/throwaway/release.p12" PH_KEYSTORE_PASSWORD="$ANDROID_KEYSTORE_PASSWORD" PH_KEY_ALIAS="$ANDROID_KEY_ALIAS" PH_KEY_PASSWORD="$ANDROID_KEY_PASSWORD"
-          ./gradlew --no-daemon assembleRelease
+          ./gradlew --no-daemon assembleRelease bundleRelease
       - name: Vérifier avec apksigner et aapt2 (vrais outils Android)
         env:
           EXPECTED_CERT_SHA256: ${{ env.THROWAWAY_SHA256 }}
@@ -138,6 +138,9 @@ jobs:
           AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
           "$AAPT" dump badging "$APK" | grep -E "^(package|sdkVersion|targetSdkVersion|application-label):"
           ls -l "$APK"
+          AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -1)
+          BUNDLETOOL="$(sh android/scripts/get-bundletool.sh)" sh android/scripts/verify-aab.sh "$AAB"
+          ls -l "$AAB"
       - name: Détruire la clé jetable
         if: always()
         run: rm -rf "$RUNNER_TEMP/throwaway"
@@ -193,8 +196,8 @@ jobs:
           PH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           PH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           PH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease
-      - name: Vérifier signature, identité et version
+        run: ./gradlew --no-daemon assembleRelease bundleRelease
+      - name: Vérifier signature, identité et version (APK + AAB)
         env:
           EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
           EXPECTED_VERSION_CODE: ${{ env.VERSION_CODE }}
@@ -203,9 +206,13 @@ jobs:
           echo "APK : $APK"
           sh android/scripts/verify-apk.sh "$APK"
           MODE=release sh android/scripts/check-apk-content.sh "$APK"
+          AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -1)
+          echo "AAB : $AAB"
+          BUNDLETOOL="$(sh android/scripts/get-bundletool.sh)" sh android/scripts/verify-aab.sh "$AAB"
           mkdir -p dist
           cp "$APK" "dist/petits-heros-${VERSION_NAME}-build${VERSION_CODE}.apk"
-          (cd dist && sha256sum *.apk > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          cp "$AAB" "dist/petits-heros-${VERSION_NAME}-build${VERSION_CODE}.aab"
+          (cd dist && sha256sum *.apk *.aab > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - name: Supprimer la clé du disque
         if: always()
         run: rm -f "$RUNNER_TEMP/release.p12"
@@ -220,8 +227,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="android-build-${VERSION_CODE}"
-          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt --target "$GITHUB_SHA" \
+          gh release create "$TAG" dist/*.apk dist/*.aab dist/SHA256SUMS.txt --target "$GITHUB_SHA" \
             --title "Petits Héros ${VERSION_NAME} (build ${VERSION_CODE})" \
-            --notes "APK Android signé. Serveur : ${PH_API_BASE}. Installer : télécharger le .apk sur le téléphone et l'ouvrir (autoriser « installer des applications inconnues » pour le navigateur). Mise à jour : installer le nouvel APK par-dessus (même clé de signature)."
+            --notes "APK Android signé + bundle .aab (Google Play : à importer dans la Play Console, ne s'installe pas directement). Serveur : ${PH_API_BASE}. Installer : télécharger le .apk sur le téléphone et l'ouvrir (autoriser « installer des applications inconnues » pour le navigateur). Mise à jour : installer le nouvel APK par-dessus (même clé de signature)."
           echo "### APK publié" >> "$GITHUB_STEP_SUMMARY"
           echo "Release : $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"

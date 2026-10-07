@@ -120,7 +120,7 @@ dataRouter.get('/children/:id/history', wrap(async (req, res) => {
   }
   const rows = (await query(
     `SELECT t.id, t.value, t.type, t.reason, t.created_at, t.balance_after, t.action_id, t.challenge_id, t.redemption_id,
-            t.reverses_id, u.name AS author,
+            t.reverses_id, COALESCE(u.name, 'Ancien parent') AS author,
             EXISTS (SELECT 1 FROM transactions x WHERE x.reverses_id = t.id) AS reversed
        FROM transactions t LEFT JOIN users u ON u.id = t.author_id
       WHERE t.child_id = $1 ${where} ORDER BY t.created_at DESC, t.id DESC LIMIT $2`, p)).rows;

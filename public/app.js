@@ -366,13 +366,13 @@ function onboardView() {
     ${a.error ? `<div class="err">${esc(a.error)}</div>` : ''}
     <div class="card"><h2>Créer ma famille</h2><form data-form="newfamily"><label class="f">Nom de la famille</label><input type="text" name="familyName" required maxlength="60"><button class="btn primary block" style="margin-top:12px">Créer</button></form></div>
     <div class="card"><h2>Rejoindre une famille</h2><form data-form="joincode"><label class="f">Code d’invitation</label><input type="text" name="code" required autocapitalize="characters" placeholder="XXXX-XXXX-XXXX"><button class="btn block" style="margin-top:12px">Rejoindre</button></form></div>
-    <p style="text-align:center"><button class="link" data-act="logout">Se déconnecter</button></p></div>`;
+    <p style="text-align:center"><button class="link" data-act="logout">Se déconnecter</button> · <button class="link small" data-act="delAcc">Supprimer mon compte</button></p><p class="muted small" style="text-align:center"><a class="link" href="${API_BASE}/confidentialite" target="_blank" rel="noopener">Politique de confidentialité</a> · <a class="link" href="${API_BASE}/suppression-compte" target="_blank" rel="noopener">Suppression de compte</a></p></div>`;
 }
 function pendingView() {
   return `<div class="auth"><div class="logo"><div class="e">⏳</div><h1>Presque prêt !</h1></div>
     <div class="card"><p>Ton code est accepté. Le parent propriétaire de la famille « ${esc(S.me.membership.familyName)} » doit maintenant <b>approuver ton accès</b> (onglet Famille).</p>
     <p class="muted small">Cette page se met à jour toute seule.</p></div>
-    <p style="text-align:center"><button class="link" data-act="logout">Se déconnecter</button></p></div>`;
+    <p style="text-align:center"><button class="link" data-act="logout">Se déconnecter</button> · <button class="link small" data-act="delAcc">Supprimer mon compte</button></p><p class="muted small" style="text-align:center"><a class="link" href="${API_BASE}/confidentialite" target="_blank" rel="noopener">Politique de confidentialité</a> · <a class="link" href="${API_BASE}/suppression-compte" target="_blank" rel="noopener">Suppression de compte</a></p></div>`;
 }
 
 // ---------- rendu : enfants ----------
@@ -558,6 +558,9 @@ function familyView() {
   <button class="row" data-act="installHelp"><div class="ic">📲</div><div class="tx">Installer sur l’écran d’accueil</div>›</button>
   <button class="row" data-act="logout"><div class="ic">👋</div><div class="tx">Se déconnecter</div></button>
   ${!owner ? `<p style="text-align:center"><button class="link small${nm()}" data-act="leave">Quitter cette famille</button></p>` : ''}
+  <h2 class="sec">Confidentialité</h2>
+  <a class="row" href="${API_BASE}/confidentialite" target="_blank" rel="noopener"><div class="ic">📄</div><div class="tx">Politique de confidentialité<small>Données collectées, durées, droits</small></div>›</a>
+  <button class="row${nm()}" data-act="delAcc"><div class="ic">🗑️</div><div class="tx">Supprimer mon compte<small>Définitif · les conséquences sont détaillées avant confirmation</small></div>›</button>
   <p class="muted small" style="text-align:center;margin-top:18px">Petits Héros collecte le minimum : prénom, avatar, couleur et âge facultatif. Pas de photo.</p>`;
 }
 
@@ -591,7 +594,7 @@ function renderSheet(fromPoll) {
   if (fromPoll) return; // on ne touche pas à une saisie en cours ; la vue se met à jour à la fermeture
   const s = S.sheet; if (!s) return;
   const bodies = { suggest: suggestSheet, regen: regenSheet, points: pointsSheet, childForm, actionForm, challengeForm, rewardForm, quickForm, invite: inviteSheet, invites: invitesSheet,
-    memberMenu, chpw: chpwSheet, install: installSheet, lockSet: () => pinSheet(true), unlock: () => pinSheet(false), confirm: confirmSheet, info: infoSheet };
+    memberMenu, chpw: chpwSheet, delacc: delAccSheet, install: installSheet, lockSet: () => pinSheet(true), unlock: () => pinSheet(false), confirm: confirmSheet, info: infoSheet };
   const [title, html] = bodies[s.kind](s);
   queueMicrotask(() => { if (S.sheet === s && s.sent) lockPanel(); });
   $('#sheet').innerHTML = `<div class="backdrop" data-act="closeBackdrop"><div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
@@ -741,7 +744,26 @@ function memberMenu(s) {
   const m = S.st.members.find((x) => x.id === s.id);
   return [esc(m.name), `${s.resetCode ? `<div class="ok">Code à communiquer (valable 1 h, usage unique) :</div><div class="big-code">${esc(s.resetCode)}</div>` : ''}
     <button class="btn block${nm()}" data-act="resetCode" data-id="${m.id}">🔑 Générer un code de nouveau mot de passe</button>
+    ${m.role === 'parent' && m.status === 'active' ? `<button class="btn block${nm()}" style="margin-top:10px" data-act="makeOwner" data-id="${m.id}">👑 Nommer propriétaire</button>` : ''}
     <button class="btn danger block${nm()}" style="margin-top:10px" data-act="removeMember" data-id="${m.id}">${m.status === 'pending' ? 'Refuser la demande' : 'Retirer de la famille'}</button>`];
+}
+function delAccSheet(s) {
+  const sit = s.sit;
+  if (!sit) return ['Supprimer mon compte', '<div class="empty">Chargement…</div>'];
+  const k = sit.kind;
+  const what = {
+    no_family: '<p>Ton compte, tes sessions et tes codes de secours seront supprimés. Tu n’appartiens à aucune famille : aucune autre donnée n’est concernée.</p>',
+    pending: '<p>Ta demande d’accès à la famille est annulée et ton compte, tes sessions et tes codes de secours sont supprimés. La famille n’est pas touchée.</p>',
+    member: '<p>Ton compte, tes sessions et tes codes de secours seront supprimés et tu quitteras la famille. <b>La famille, les enfants, les points et les autres parents ne sont pas touchés.</b> Les mouvements que tu as saisis restent dans l’historique, sous la mention « Ancien parent ».</p>',
+    owner_alone: '<p class="warn">Tu es le seul parent de la famille. <b>Supprimer ton compte supprime aussi la famille et toutes ses données</b> : profils des enfants, points, historique, défis, récompenses et invitations. Aucune récupération n’est possible. Pense à exporter les données avant (Famille › Exporter les données).</p>',
+    owner_with_parents: `<p class="warn">Tu es propriétaire de la famille et ${sit.activeParents} autre${sit.activeParents > 1 ? 's' : ''} parent${sit.activeParents > 1 ? 's y ont' : ' y a'} accès. Pour ne pas bloquer la famille, la suppression est refusée tant que tu es propriétaire : nomme d’abord un autre propriétaire (Famille › ⋯ › Nommer propriétaire), puis reviens ici.</p>`,
+  }[k];
+  const form = k === 'owner_with_parents' ? '' : `<form data-form="delacc">
+    ${k === 'owner_alone' ? '<label class="check"><input type="checkbox" name="deleteFamily" required>Je comprends que la famille et toutes ses données seront supprimées définitivement</label>' : ''}
+    <label class="f">Mot de passe</label><input type="password" name="password" required autocomplete="current-password">
+    <label class="f">Écris SUPPRIMER pour confirmer</label><input type="text" name="confirm" required autocapitalize="characters" autocomplete="off">
+    <button class="btn danger block${nm()}" style="margin-top:14px">Supprimer définitivement mon compte</button></form>`;
+  return ['Supprimer mon compte', `${what}${form}<p class="muted small"><a class="link" href="${API_BASE}/suppression-compte" target="_blank" rel="noopener">Plus de détails</a></p>`];
 }
 function chpwSheet() {
   return ['Changer mon mot de passe', `<form data-form="chpw"><label class="f">Mot de passe actuel</label><input type="password" name="current" required autocomplete="current-password">
@@ -1010,6 +1032,12 @@ const A = {
   lockOn: () => openSheet({ kind: 'lockSet' }),
   unlock: () => openSheet({ kind: 'unlock' }),
   chpw: () => openSheet({ kind: 'chpw' }),
+  delAcc: () => {
+    openSheet({ kind: 'delacc', sit: null });
+    const sh = S.sheet;
+    api('GET', '/api/auth/account-situation').then((r) => { if (S.sheet === sh) { sh.sit = r; renderSheet(); } }).catch((e) => { if (S.sheet === sh) { sh.error = errMsg(e); renderSheet(); } });
+  },
+  makeOwner: (d) => ask('Nommer propriétaire ?', 'Ce parent deviendra propriétaire (invitations, validations, export, suppression de la famille). Tu deviendras parent simple. Tu pourras ensuite supprimer ton compte si tu le souhaites.', 'Nommer propriétaire', () => run(async () => { await api('POST', `/api/family/members/${d.id}/make-owner`, {}); await refresh(true); closeSheet(); toast('Nouveau propriétaire nommé ✓'); }), false),
   installHelp: () => openSheet({ kind: 'install' }),
   doInstall: async () => { const ev = S.installEvt; S.installEvt = null; closeSheet(); try { await ev?.prompt(); } catch { /* refusé par le navigateur */ } },
   exportData: () => run(async () => {
@@ -1061,6 +1089,12 @@ const F = {
     await write('POST', '/api/challenges', body); closeSheet(); go('#/challenges');
   },
   quick: async (f) => { await write('PATCH', '/api/family/settings', { quickPlus: csvInts(f.plus.value), quickMinus: csvInts(f.minus.value) }); closeSheet(); },
+  delacc: async (f) => {
+    const body = { password: f.password.value, confirm: f.confirm.value, deleteFamily: !!f.deleteFamily?.checked };
+    const r = await api('POST', '/api/auth/delete-account', body);
+    stopPolling(); wipeLocal(); S.me = null; S.st = null; closeSheetQuiet();
+    S.auth = { mode: 'login', error: '', info: r.familyDeleted ? 'Compte et famille supprimés.' : 'Compte supprimé.' }; go('#/'); render();
+  },
   chpw: async (f) => { await api('POST', '/api/auth/change-password', { current: f.current.value, password: f.password.value }); closeSheet(); toast('Mot de passe modifié ✓'); },
   lockSet: async (f) => { if (!/^\d{4}$/.test(f.pin.value)) throw new Error('4 chiffres'); const salt = uid(); S.lock = { on: true, salt, hash: await sha(salt + f.pin.value) }; save('ph_lock', S.lock); closeSheetQuiet(); go('#/children'); render(); },
   unlock: async (f) => { if ((await sha(S.lock.salt + f.pin.value)) !== S.lock.hash) throw new Error('Code incorrect'); S.lock = { on: false }; save('ph_lock', S.lock); closeSheet(); },

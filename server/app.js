@@ -85,11 +85,21 @@ export function createApp() {
   app.use('/api', dataRouter);
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Introuvable')));
 
+  // Pages légales publiques (exigées par Google Play) : modèles HTML dans public/legal/, identité injectée depuis la configuration.
+  const LEGAL_UPDATED = '7 octobre 2026';
+  const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const legal = (file) => (_req, res) => {
+    const html = fs.readFileSync(path.join(pub, 'legal', file), 'utf8')
+      .replaceAll('{{CONTACT_EMAIL}}', esc(config.contactEmail)).replaceAll('{{PUBLISHER}}', esc(config.publisherName)).replaceAll('{{UPDATED}}', LEGAL_UPDATED);
+    res.set('Cache-Control', 'no-cache').type('html').send(html);
+  };
+  app.get(['/confidentialite', '/confidentialite/'], legal('confidentialite.html'));
+  app.get(['/suppression-compte', '/suppression-compte/'], legal('suppression-compte.html'));
   app.get('/sw.js', (_req, res) => { res.set('Cache-Control', 'no-cache'); res.sendFile(path.join(pub, 'sw.js')); });
   app.use(express.static(pub, { maxAge: 0, etag: true, setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
   app.use((req, res) => res.status(404).sendFile(path.join(pub, 'index.html')));
 
-  app.use((err, _req, res, _next) => {
+  app.use((err, req, res, _next) => {
     if (res.headersSent) return;
     if (err instanceof HttpError) {
       if (err.retryAfter) res.set('Retry-After', String(err.retryAfter));
@@ -97,7 +107,7 @@ export function createApp() {
     }
     if (err.type === 'entity.parse.failed' || err.status === 400) return res.status(400).json({ ok: false, error: 'Requête invalide' });
     if (err.code === '22P02') return res.status(404).json({ ok: false, error: 'Introuvable' });
-    console.error(err);
+    console.error(`erreur serveur ${req.method} ${req.path} (${err.code || err.name || 'inconnue'})`);   // jamais le message complet : il peut contenir des données personnelles
     res.status(500).json({ ok: false, error: 'Erreur serveur' });
   });
   return app;

@@ -20,7 +20,7 @@ if (!TEST && !/^https:\/\//.test(api)) throw new Error(`PH_API_BASE doit être e
 if (!Number.isInteger(versionCode) || versionCode < 1) throw new Error('VERSION_CODE invalide');
 
 fs.rmSync(out, { recursive: true, force: true });
-fs.cpSync(path.join(root, 'public'), out, { recursive: true, filter: (p) => !/[\\/](sw\.js|manifest\.webmanifest)$/.test(p) });
+fs.cpSync(path.join(root, 'public'), out, { recursive: true, filter: (p) => !/[\\/](sw\.js|manifest\.webmanifest)$/.test(p) && !/[\\/]public[\\/]legal([\\/]|$)/.test(p) });
 fs.writeFileSync(path.join(out, 'config.js'),
   `window.PH_API_BASE = ${JSON.stringify(api)};\nwindow.PH_BUILD = ${versionCode};\nwindow.PH_VERSION = ${JSON.stringify(versionName)};\n`);
 await build({

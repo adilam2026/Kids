@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supprimer mon compte — Petits Héros</title><meta name="robots" content="index,follow"><link rel="stylesheet" href="/legal/style.css"></head>
+<body><main>
+<nav><a href="/">Petits Héros</a> <a href="/confidentialite">Politique de confidentialité</a></nav>
+<h1>Supprimer mon compte Petits Héros</h1>
+<p class="muted">Application « Petits Héros » · éditeur {{PUBLISHER}} · contact <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a></p>
+
+<div class="card">
+<h2 style="margin-top:0">Ce qui est supprimé</h2>
+<ul>
+<li><strong>Si vous n’êtes pas le propriétaire de la famille</strong> : votre compte (e-mail, prénom, mot de passe, codes de secours, sessions) est supprimé définitivement. La famille et ses données restent pour les autres parents ; les mouvements de points que vous avez saisis restent dans l’historique, sans votre nom.</li>
+<li><strong>Si vous êtes propriétaire et que d’autres parents ont accès</strong> : la suppression est refusée tant que vous n’avez pas nommé un autre propriétaire (dans l’application : Famille › ⋯ › Nommer propriétaire) ou retiré les autres parents.</li>
+<li><strong>Si vous êtes le seul parent</strong> : votre compte <strong>et la famille entière</strong> sont supprimés : enfants, points, historique, défis, récompenses, invitations. <strong>C’est irréversible.</strong> Pensez à exporter les données avant (application › Famille › Exporter les données).</li>
+</ul>
+<p class="muted">Vous pouvez aussi le faire dans l’application : <em>Famille › Supprimer mon compte</em>. Détails : <a href="/confidentialite">politique de confidentialité</a>.</p>
+</div>
+
+<form id="f" class="card" autocomplete="off">
+<h2 style="margin-top:0">Demander la suppression</h2>
+<label for="email">Adresse e-mail du compte</label><input id="email" type="email" required autocomplete="email">
+<label for="pw">Mot de passe</label><input id="pw" type="password" required autocomplete="current-password">
+<p class="muted">Mot de passe oublié ? <a href="/#/forgot">Recevez un lien de récupération</a> (ou utilisez un code de secours), puis revenez ici.</p>
+<div id="familyBox" hidden><div class="warn">Vous êtes le seul parent : la famille et toutes ses données seront aussi supprimées, définitivement.</div>
+<label class="check"><input id="delFam" type="checkbox"> Je comprends et je veux supprimer aussi la famille et toutes ses données.</label></div>
+<label for="confirm">Pour confirmer, écrivez SUPPRIMER</label><input id="confirm" type="text" required autocomplete="off" autocapitalize="characters">
+<button class="danger" id="go" type="submit">Supprimer définitivement mon compte</button>
+<p id="msg" role="status" aria-live="polite"></p>
+</form>
+<p class="muted">Impossible de vous connecter ? Écrivez depuis l’adresse du compte à <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a> en indiquant « Suppression de compte Petits Héros » : nous vérifierons que la demande vient bien de l’adresse du compte avant de supprimer.</p>
+</main><script src="/legal/delete.js"></script></body></html>

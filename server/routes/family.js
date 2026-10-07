@@ -129,6 +129,19 @@ familyRouter.delete('/members/:uid', requireOwner, wrap(async (req, res) => {
   });
   res.json({ ok: true });
 }));
+// Transfert de propriété : prérequis pour qu'un propriétaire puisse supprimer son compte sans supprimer la famille
+familyRouter.post('/members/:uid/make-owner', requireOwner, wrap(async (req, res) => {
+  const uid = uuid(req.params.uid);
+  if (uid === req.user.id) throw new HttpError(409, 'Tu es déjà propriétaire');
+  await withTx(async (c) => {
+    await c.query('SELECT 1 FROM families WHERE id=$1 FOR UPDATE', [req.member.familyId]);
+    const t = await c.query(`UPDATE members SET role='owner' WHERE family_id=$1 AND user_id=$2 AND status='active' AND role='parent'`, [req.member.familyId, uid]);
+    if (!t.rowCount) throw new HttpError(404, 'Parent actif introuvable');
+    await c.query(`UPDATE members SET role='parent' WHERE family_id=$1 AND user_id=$2`, [req.member.familyId, req.user.id]);
+    await c.query('UPDATE families SET rev = rev + 1 WHERE id=$1', [req.member.familyId]);
+  });
+  res.json({ ok: true });
+}));
 // Code de réinitialisation remis en main propre (fonctionne sans service e-mail)
 familyRouter.post('/members/:uid/reset-code', requireOwner, wrap(async (req, res) => {
   hit(`resetcode:${req.user.id}`, 10, 3600_000);

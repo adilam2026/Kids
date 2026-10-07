@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Politique de confidentialité — Petits Héros</title><meta name="robots" content="index,follow"><link rel="stylesheet" href="/legal/style.css"></head>
+<body><main>
+<nav><a href="/">Petits Héros</a> <a href="/suppression-compte">Supprimer mon compte</a></nav>
+<h1>Politique de confidentialité — Petits Héros</h1>
+<p class="muted">Dernière mise à jour : {{UPDATED}} · Éditeur : {{PUBLISHER}} · Contact : <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a></p>
+
+<p>Petits Héros est une application destinée aux <strong>parents</strong> : elle les aide à encourager les petites réussites du quotidien de leurs enfants avec des points, des défis et des récompenses. Cette page explique, de façon exacte, quelles données sont enregistrées, pourquoi, chez qui, combien de temps, et comment les supprimer.</p>
+
+<h2>1. Données enregistrées</h2>
+<table>
+<tr><th>Donnée</th><th>Origine</th><th>À quoi elle sert</th></tr>
+<tr><td><strong>Compte parent</strong> : adresse e-mail, prénom, mot de passe (enregistré uniquement sous forme <em>hachée</em>, donc illisible), codes de secours (hachés), sessions de connexion (jeton haché, dates de création, de dernière utilisation et d’expiration)</td><td>Saisis par le parent à la création du compte</td><td>Se connecter, rester connecté, retrouver l’accès à son compte</td></tr>
+<tr><td><strong>Famille</strong> : nom de la famille, parents rattachés (rôle et statut), codes d’invitation (hachés, valables 48 h)</td><td>Saisis par les parents</td><td>Partager les mêmes données entre les parents d’une famille</td></tr>
+<tr><td><strong>Enfants</strong> : prénom, avatar (émoji), couleur, âge (facultatif), solde de points</td><td>Saisis par les parents (les enfants n’ont ni compte ni identifiant)</td><td>Afficher les profils et les points</td></tr>
+<tr><td><strong>Activité familiale</strong> : mouvements de points (valeur, type, motif écrit par le parent, date, parent auteur), actions, défis, récompenses et échanges personnalisés</td><td>Saisis par les parents</td><td>Historique, bilan hebdomadaire, défis, récompenses</td></tr>
+<tr><td><strong>Technique</strong> : identifiants d’opération anti-doublon et réponses associées (7 jours), compteurs de tentatives de connexion (en mémoire du serveur, non conservés au redémarrage)</td><td>Générés par l’application</td><td>Éviter les doublons, limiter les abus</td></tr>
+</table>
+<h3>Ce qui n’est pas collecté</h3>
+<p>Aucune photo, aucun contact, aucune position, aucun accès au micro ni à l’appareil photo, aucun identifiant publicitaire, aucune donnée de santé, aucune donnée de paiement. L’application Android ne demande qu’une seule autorisation : l’accès à Internet. Elle ne contient ni publicité, ni outil de mesure d’audience, ni traceur de tiers.</p>
+<h3>Sur votre appareil</h3>
+<p>Le navigateur ou l’application conserve localement : vos préférences (sons, animations), une copie de lecture des dernières données de la famille (7 jours au plus, effacée à la déconnexion, au changement de compte ou à la révocation de la session), le code à 4 chiffres du « mode enfant » (haché, jamais envoyé au serveur) et la session (cookie sécurisé dans un navigateur ; stockage privé de l’application sur Android).</p>
+
+<h2>2. Finalités et bases légales (RGPD)</h2>
+<p>Fournir le service demandé (compte, synchronisation entre parents, points, défis, récompenses) : exécution du service. Sécurité (limitation des tentatives, révocation des sessions) : intérêt légitime. L’adresse e-mail n’est utilisée que pour la connexion et pour l’envoi, à votre demande, du message de récupération de mot de passe. Elle n’est jamais utilisée pour de la publicité.</p>
+
+<h2>3. Qui reçoit les données</h2>
+<ul>
+<li><strong>Railway</strong> : hébergement de l’application et de sa base de données PostgreSQL (sous-traitant de l’éditeur).</li>
+<li><strong>Brevo</strong> : envoi des e-mails de récupération de mot de passe. Brevo reçoit l’adresse e-mail du destinataire et le contenu du message (qui contient le lien de réinitialisation).</li>
+<li><strong>GitHub</strong> : distribution du fichier d’installation. GitHub ne reçoit aucune donnée des utilisateurs de l’application.</li>
+</ul>
+<p>Les données d’une famille ne sont visibles que par les parents rattachés et approuvés de cette famille. Elles ne sont ni vendues, ni partagées avec d’autres familles, ni utilisées pour de la publicité. Ces prestataires peuvent traiter des données en dehors de l’Union européenne dans le respect des garanties prévues par le RGPD ; leurs propres politiques de confidentialité s’appliquent à leurs traitements.</p>
+
+<h2>4. Durées de conservation</h2>
+<table>
+<tr><th>Donnée</th><th>Durée</th></tr>
+<tr><td>Compte, famille, enfants, historique, défis, récompenses</td><td>Jusqu’à leur suppression (voir §6)</td></tr>
+<tr><td>Session de connexion</td><td>90 jours à compter de la dernière utilisation ; révoquée à la déconnexion, au changement de mot de passe, au retrait du parent ; purge automatique des sessions expirées</td></tr>
+<tr><td>Lien de récupération de mot de passe</td><td>1 heure, usage unique ; supprimé au plus tard un jour après son expiration</td></tr>
+<tr><td>Code d’invitation</td><td>48 heures, usage unique ; supprimé au plus tard 7 jours après son expiration</td></tr>
+<tr><td>Identifiants anti-doublon</td><td>7 jours</td></tr>
+<tr><td>Copie de lecture sur l’appareil</td><td>7 jours au plus</td></tr>
+</table>
+<p class="muted">Des sauvegardes techniques de la base peuvent exister chez l’hébergeur : une donnée supprimée peut y subsister jusqu’à la rotation de ces sauvegardes, sans être réutilisée.</p>
+
+<h2>5. Vos droits</h2>
+<p>Accès, rectification, effacement, limitation, opposition, portabilité : vous pouvez modifier les prénoms, avatars, âges, actions et récompenses directement dans l’application ; le parent propriétaire peut <strong>exporter</strong> toutes les données de la famille (fichier JSON) depuis l’onglet Famille ; la suppression est décrite ci-dessous. Pour toute autre demande : <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a>. Vous pouvez aussi saisir la CNIL (<a href="https://www.cnil.fr">cnil.fr</a>).</p>
+
+<h2>6. Supprimer son compte et ses données</h2>
+<p><strong>Dans l’application</strong> : onglet <em>Famille › Supprimer mon compte</em>. <strong>Sur le web</strong> : <a href="/suppression-compte">page de demande de suppression</a>. Conséquences, selon votre situation :</p>
+<ul>
+<li><strong>Parent non propriétaire</strong> : votre compte, vos sessions et vos codes de secours sont supprimés définitivement. La famille et ses données restent accessibles aux autres parents ; les mouvements de points que vous avez saisis restent dans l’historique, sans votre nom (« Ancien parent »).</li>
+<li><strong>Propriétaire avec d’autres parents</strong> : nommez d’abord un autre propriétaire (ou retirez les autres parents), puis supprimez votre compte comme ci-dessus.</li>
+<li><strong>Seul parent de la famille</strong> : la famille est <strong>supprimée avec toutes ses données</strong> (enfants, points, historique, défis, récompenses, invitations), en plus de votre compte. C’est irréversible.</li>
+</ul>
+<p>La suppression est immédiate dans la base de l’application. Pour une demande sans accès au compte, écrivez depuis l’adresse du compte à <a href="mailto:{{CONTACT_EMAIL}}">{{CONTACT_EMAIL}}</a>.</p>
+
+<h2>7. Enfants</h2>
+<p>L’application s’adresse aux adultes. Aucune donnée n’est collectée auprès des enfants : ils n’ont ni compte, ni identifiant, ni connexion. Seules les informations saisies par les parents (prénom, avatar, couleur, âge facultatif, points) sont enregistrées. Le « mode enfant » est un affichage en lecture seule sur l’appareil du parent.</p>
+
+<h2>8. Sécurité</h2>
+<p>Connexions chiffrées (HTTPS), mots de passe hachés, sessions révocables, limitation des tentatives de connexion, d’invitation et de récupération, isolation stricte des familles côté serveur. Aucune mesure ne garantit une sécurité absolue : choisissez un mot de passe unique et conservez vos codes de secours en lieu sûr.</p>
+
+<h2>9. Modifications</h2>
+<p>Toute modification importante de cette politique sera indiquée ici, avec la date de mise à jour.</p>
+</main></body></html>
