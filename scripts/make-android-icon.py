@@ -40,19 +40,21 @@ def cutout():
     return Image.fromarray(out, 'RGBA')
 
 def subject_geometry(im):
+    """Rayon de la mascotte mesuré depuis le CENTRE DE L'IMAGE SOURCE (pas depuis ses contours) : la composition d'origine,
+    asymétrique à cause de la cape, est conservée telle quelle ; seule l'échelle varie."""
     al = np.array(im.split()[3]) > 40
     ys, xs = np.where(al)
-    cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
-    return xs, ys, cx, cy
+    return xs, ys, im.width / 2, im.height / 2
 
-def place(im, size, max_radius_frac, bg=None, centre_on='bbox'):
-    """Place la mascotte sur un carré size×size : tous les pixels visibles à ≤ max_radius_frac*size du centre."""
+def place(im, size, max_radius_frac, bg=None):
+    """Place l'image source entière (même composition, aucun décalage de la mascotte) sur un carré size×size,
+    centre de l'image = centre du carré ; échelle telle que tous les pixels visibles soient à ≤ max_radius_frac*size du centre."""
     xs, ys, cx, cy = subject_geometry(im)
     r = np.sqrt((xs - cx) ** 2 + (ys - cy) ** 2).max()
     s = max_radius_frac * size / r
     sub = im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS)
     canvas = Image.new('RGBA', (size, size), (*bg, 255) if bg else (0, 0, 0, 0))
-    ox, oy = round(size / 2 - cx * s), round(size / 2 - cy * s)
+    ox, oy = round(size / 2 - sub.width / 2), round(size / 2 - sub.height / 2)
     layer = Image.new('RGBA', (size, size), (0, 0, 0, 0)); layer.paste(sub, (ox, oy), sub)
     return Image.alpha_composite(canvas, layer), layer
 
