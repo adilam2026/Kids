@@ -48,6 +48,12 @@ GitHub → **Actions → Android APK → Run workflow** (branche `claude/petits-
 
 `versionCode` = numéro d'exécution du workflow (croît à chaque APK). Si vous recréez un jour le dépôt, fixez la variable `ANDROID_VERSION_CODE_OFFSET` (Settings → Variables) au-dessus du dernier build publié.
 
+## Clé de signature définitive (créée le 2026-10-07)
+
+* Empreinte SHA-256 du certificat (publique, pour vérifier tout futur APK) : `bbdde15cec72b1fec4b07fcc13d89f81f93bd81606709ccec91c82cc1a93dd67`
+* Stockage durable : secrets GitHub Actions (`ANDROID_KEYSTORE_*`, `ANDROID_KEY_*`, `ANDROID_CERT_SHA256`) — pas le cache. Sauvegarde chiffrée téléchargée par le propriétaire (voir `android/RESTORE-SIGNING.md`).
+* Première Release de production : `android-build-7` (`petits-heros-1.1.0-build7.apk`).
+
 ## Passage à l'APK de production (final)
 
 * **Désinstaller l'APK de test avant d'installer l'APK de production** : leur signature est différente (clé de débogage vs clé définitive), Android refuse de remplacer l'un par l'autre. C'est la seule fois : toutes les mises à jour suivantes se feront par-dessus, avec la même clé.
