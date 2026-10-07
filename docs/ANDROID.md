@@ -48,6 +48,13 @@ GitHub → **Actions → Android APK → Run workflow** (branche `claude/petits-
 
 `versionCode` = numéro d'exécution du workflow (croît à chaque APK). Si vous recréez un jour le dépôt, fixez la variable `ANDROID_VERSION_CODE_OFFSET` (Settings → Variables) au-dessus du dernier build publié.
 
+## Passage à l'APK de production (final)
+
+* **Désinstaller l'APK de test avant d'installer l'APK de production** : leur signature est différente (clé de débogage vs clé définitive), Android refuse de remplacer l'un par l'autre. C'est la seule fois : toutes les mises à jour suivantes se feront par-dessus, avec la même clé.
+* **Les données familiales ne sont pas touchées** : enfants, points, historique, défis, récompenses et comptes sont sur le serveur Railway. Après installation, se reconnecter avec son e-mail et son mot de passe (c'est le jeton local qui est perdu à la désinstallation, pas les données).
+* L'APK de production est compilé en `release` (non débogable, vérifié avec `aapt2`), signé avec la clé définitive stockée dans les secrets GitHub (jamais dans le cache), avec un `versionCode` supérieur à celui du test.
+* **Lien direct du fichier** (dépôt public, sans connexion GitHub) : `https://github.com/adilam2026/Kids/releases/download/android-build-<versionCode>/petits-heros-<version>-build<versionCode>.apk`.
+
 ## APK de test (signature de débogage) — mises à jour
 
 L'artefact `petits-heros-test-android` (workflow *Android APK*, job « Compilation de contrôle ») est un APK **de test** signé avec une clé de **débogage**.
