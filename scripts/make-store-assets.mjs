@@ -52,17 +52,6 @@ await P.evaluate(() => { document.querySelector('[data-act=toggleSound]').scroll
 await shot('06-famille-reglages');
 await ctx.close();
 
-// --- icône 512×512 (sans transparence) et visuel de présentation 1024×500 ---
-const svg = fs.readFileSync('public/icons/icon.svg', 'utf8').replace('<svg ', '<svg width="100%" height="100%" ');
-const g = await (await mk(1024, 500, 1)).newPage();
-await g.setViewportSize({ width: 512, height: 512 });
-await g.setContent(`<body style="margin:0;background:#FF8A3D"><div style="width:512px;height:512px">${svg}</div></body>`);
-await g.screenshot({ path: `${OUT}/graphics/icon-512.png` });
-await g.setViewportSize({ width: 1024, height: 500 });
-await g.setContent(`<body style="margin:0;width:1024px;height:500px;background:linear-gradient(135deg,#FF8A3D,#FFB36B 55%,#FFD9A8);font-family:system-ui,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;overflow:hidden">
-  <div style="width:210px;height:210px;margin-left:80px;border-radius:48px;overflow:hidden;box-shadow:0 10px 30px #0003;flex:none">${svg}</div>
-  <div style="margin-left:56px;color:#3a1f00"><div style="font-size:84px;font-weight:800;line-height:1">Petits Héros</div>
-  <div style="font-size:34px;margin-top:16px;font-weight:600;max-width:600px;line-height:1.25">Des points, des défis et des récompenses pour toute la famille</div></div></body>`);
-await g.screenshot({ path: `${OUT}/graphics/feature-graphic-1024x500.png` });
+// Icône 512 et image de présentation : issues de l'illustration mascotte (android/icon-source/petits-heros-mascotte.png) — non régénérées ici.
 await browser.close(); await S.close();
 console.log('visuels écrits dans store/');
