@@ -3,6 +3,20 @@
 > État : **préparé, non soumis**. Rien n’a été envoyé à Google. Rien n’est « accepté par Google » tant que la Play Console ne l’affiche pas.
 > Textes de la fiche : [`store/listing-fr.md`](../store/listing-fr.md) · Visuels : `store/graphics/`, `store/screenshots/`.
 
+## 0. Livraison (build 19, version 1.4.0)
+
+Release : https://github.com/adilam2026/Kids/releases/tag/android-build-19
+
+| Fichier | Lien direct | SHA-256 |
+|---|---|---|
+| **AAB signé (Play Console)** | https://github.com/adilam2026/Kids/releases/download/android-build-19/petits-heros-1.4.0-build19.aab | `a04a0028cd5268c6ea604255126b6457b7cfa3bc8a4393a322bff4899a6f6aab` |
+| APK de la même version (essai sur téléphone) | https://github.com/adilam2026/Kids/releases/download/android-build-19/petits-heros-1.4.0-build19.apk | `a49a86be1a725e5791b1121161188caa11ef5c8b6c12ba6772972067be70810f` |
+| Empreintes | https://github.com/adilam2026/Kids/releases/download/android-build-19/SHA256SUMS.txt | |
+
+Vérifié : `fr.petitsheros.app`, versionCode 19 (> 11, le dernier APK publié avant), targetSdk 36, signature par la clé définitive (certificat SHA-256 `bbdde15c…93dd67`, relu après téléchargement avec `keytool`/`jarsigner`), non débogable, aucune page légale embarquée.
+Visuels : `store/graphics/` et `store/screenshots/` (dépôt, branche `claude/petits-heros-app-cukdzu`).
+Pages publiques (vérifiées sur le déploiement réel, commit `ff865bf`) : https://petits-heros-production.up.railway.app/confidentialite et https://petits-heros-production.up.railway.app/suppression-compte
+
 ## 1. Ce qui est prêt, vérifié, ou à faire
 
 **Testé automatiquement (dans ce dépôt / GitHub Actions)**
