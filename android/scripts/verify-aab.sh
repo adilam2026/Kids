@@ -11,7 +11,7 @@ fail() { echo "ÉCHEC : $*"; exit 1; }
 # 1. signature
 jarsigner -verify "$AAB" >/tmp/js.txt 2>&1 || { cat /tmp/js.txt; fail "jarsigner : signature invalide"; }
 grep -q "jar verified" /tmp/js.txt || fail "jarsigner n'a pas confirmé la signature"
-GOT="$(keytool -printcert -jarfile "$AAB" 2>/dev/null | sed -n 's/^ *SHA256: *//p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
+GOT="$(keytool -printcert -jarfile "$AAB" 2>/dev/null | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -1 | tr -d ':' | tr 'A-F' 'a-f')"
 WANT="$(echo "$EXPECTED_CERT_SHA256" | tr -d ':' | tr 'A-F' 'a-f')"
 [ -n "$GOT" ] || fail "empreinte du certificat introuvable"
 [ "$GOT" = "$WANT" ] || fail "certificat de l'AAB ($GOT) ≠ clé attendue ($WANT)"
