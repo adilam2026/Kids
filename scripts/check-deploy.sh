@@ -28,4 +28,10 @@ case "$BASE" in
   *) echo "  ! URL non HTTPS : cookies Secure / PWA installable seulement en HTTPS (hors localhost)" ;;
 esac
 hdr "$BASE/sw.js" | grep -qi '^cache-control:.*no-cache' && ok "sw.js non mis en cache (mises à jour immédiates)" || bad "sw.js : Cache-Control"
+# pages légales publiques (exigées par Google Play) : accessibles sans connexion, sans balise non remplacée
+for p in /confidentialite /suppression-compte; do
+  T=$(curl -sS -m 15 -w '\n%{http_code}' "$BASE$p" 2>/dev/null); C=$(echo "$T" | tail -1)
+  [ "$C" = 200 ] && ! echo "$T" | grep -q '{{' && echo "$T" | grep -qi 'petits h' && ok "$p (200, sans balise non remplacée)" || bad "$p"
+done
+[ "$(code -X POST -H 'content-type: application/json' --data '{"email":"x@example.com","password":"x","confirm":"SUPPRIMER"}' "$BASE/api/auth/delete-account-public")" = 401 ] && ok "suppression publique : refus sans identifiants valides (401)" || bad "suppression publique : réponse inattendue"
 [ $FAIL = 0 ] && echo "=> OK" || { echo "=> ÉCHEC"; exit 1; }
