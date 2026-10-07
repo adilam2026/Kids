@@ -13,6 +13,8 @@ export const DEFAULT_ACTIONS = [
   A('Relations et efforts', '⏳', 'Attendre son tour pendant un jeu', 2),
   A('Relations et efforts', '💪', 'Persévérer dans une activité difficile', 3),
   A('Relations et efforts', '💡', 'Prendre une initiative utile', 5),
+  { theme: 'Sommeil', icon: '🌙', title: 'Faire une nuit complète', value: 10, note: 'Validée le matin par un parent, une fois par nuit. Aucun retrait en cas de réveil.', minIntervalHours: 12 },
+  { theme: 'Repas', icon: '🍽️', title: 'Finir son assiette', value: 3, note: 'Une validation par repas, pour une portion adaptée. On ne force jamais l’enfant s’il n’a plus faim.', minIntervalHours: 3 },
   A('Malus facultatifs', '✋', 'Frapper ou pousser', -2),
   A('Malus facultatifs', '🔨', 'Abîmer volontairement un objet', -2),
 ];
@@ -26,8 +28,8 @@ export async function seedFamily(c, familyId) {
   let i = 0;
   for (const a of DEFAULT_ACTIONS) {
     await c.query(
-      'INSERT INTO actions(family_id, theme, title, icon, value, sort) VALUES ($1,$2,$3,$4,$5,$6)',
-      [familyId, a.theme, a.title, a.icon, a.value, i++],
+      'INSERT INTO actions(family_id, theme, title, icon, value, note, min_interval_hours, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [familyId, a.theme, a.title, a.icon, a.value, a.note || '', a.minIntervalHours ?? null, i++],
     );
   }
   for (const r of DEFAULT_REWARDS) {
@@ -45,6 +47,10 @@ export const SUGGESTED_ACTIONS = [
   { key: 'consigne-simple', theme: 'Relations et efforts', icon: '👂', title: 'Suivre une consigne simple', value: 1 },
   { key: 'entrer-en-classe', theme: 'École', icon: '🏫', title: 'Entrer en classe malgré son chagrin, même avec quelques larmes', value: 2 },
   { key: 'routine-coucher', theme: 'Autonomie', icon: '🌙', title: 'Faire la routine du coucher', value: 2 },
+  { key: 'nuit-complete', theme: 'Sommeil', icon: '🌙', title: 'Faire une nuit complète', value: 10, minIntervalHours: 12,
+    note: 'Validée le matin par un parent, une fois par nuit. Aucun retrait en cas de réveil.' },
+  { key: 'finir-assiette', theme: 'Repas', icon: '🍽️', title: 'Finir son assiette', value: 3, minIntervalHours: 3,
+    note: 'Une validation par repas, pour une portion adaptée. On ne force jamais l’enfant s’il n’a plus faim.' },
   // petits malus : à utiliser seulement après un rappel clair
   { key: 'malus-crier', theme: 'Malus facultatifs', icon: '📢', title: 'Continuer à crier sur quelqu’un', value: -1, malus: true },
   { key: 'malus-refus-consigne', theme: 'Malus facultatifs', icon: '🙅', title: 'Refuser une consigne simple et comprise', value: -1, malus: true },

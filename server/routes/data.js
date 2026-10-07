@@ -69,6 +69,21 @@ dataRouter.post('/children/:id/points', mutate(async (req, c, fam) => {
     if (Math.sign(a.value) !== Math.sign(value)) throw bad('Le signe ne correspond pas à l’action');
     actionId = a.id;
     reason = reason || a.title;
+    // Fréquence : « une fois par nuit / par repas » = délai minimum entre deux validations d'une même action pour un même enfant.
+    // Les validations annulées ne comptent pas. Pas de retrait de points pour un oubli : le parent peut simplement valider plus tard.
+    if (a.min_interval_hours && value > 0) {
+      const last = (await c.query(
+        `SELECT extract(epoch FROM now() - t.created_at) AS age FROM transactions t
+          WHERE t.child_id=$1 AND t.action_id=$2 AND t.value > 0 AND t.type IN ('gain','bonus')
+            AND t.created_at > now() - make_interval(hours => $3)
+            AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.reverses_id = t.id)
+          ORDER BY t.created_at DESC LIMIT 1`, [ch.id, a.id, a.min_interval_hours])).rows[0];
+      if (last) {
+        const mins = Math.max(1, Math.round(last.age / 60));
+        const ago = mins < 90 ? `${mins} min` : `${Math.round(mins / 60)} h`;
+        throw new HttpError(409, `« ${a.title} » a déjà été validé pour ${ch.name} il y a ${ago} (une validation par tranche de ${a.min_interval_hours} h). Pour corriger, annule la validation précédente dans l’historique.`, 'too_soon');
+      }
+    }
   }
   const type = value < 0 ? 'malus' : b.bonus ? 'bonus' : 'gain';
   if (!reason) {
@@ -143,15 +158,17 @@ function actionFields(b) {
     theme: str(b.theme, 'Thème', { required: true, max: 40 }),
     title: str(b.title, 'Titre', { required: true, max: 80 }),
     icon: icon(b.icon), value, favorite: !!b.favorite, childIds: uuidList(b.childIds),
+    note: str(b.note, 'Note', { max: 160 }),
+    minIntervalHours: b.minIntervalHours === '' ? null : int(b.minIntervalHours, 'Délai minimum (heures)', { min: 1, max: 72, required: false }),
   };
 }
 dataRouter.post('/actions', mutate(async (req, c, fam) => {
   const o = actionFields(req.body || {});
   await checkChildIds(c, fam, o.childIds);
   const r = await c.query(
-    `INSERT INTO actions(family_id, theme, title, icon, value, favorite, child_ids, sort)
-     VALUES ($1,$2,$3,$4,$5,$6,$7, (SELECT COALESCE(max(sort),0)+1 FROM actions WHERE family_id=$1)) RETURNING id`,
-    [fam, o.theme, o.title, o.icon, o.value, o.favorite, o.childIds]);
+    `INSERT INTO actions(family_id, theme, title, icon, value, favorite, child_ids, note, min_interval_hours, sort)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, (SELECT COALESCE(max(sort),0)+1 FROM actions WHERE family_id=$1)) RETURNING id`,
+    [fam, o.theme, o.title, o.icon, o.value, o.favorite, o.childIds, o.note, o.minIntervalHours]);
   return { id: r.rows[0].id };
 }));
 dataRouter.patch('/actions/:id', mutate(async (req, c, fam) => {
@@ -162,11 +179,12 @@ dataRouter.patch('/actions/:id', mutate(async (req, c, fam) => {
   const merged = {
     theme: b.theme ?? a.theme, title: b.title ?? a.title, icon: b.icon ?? a.icon, value: b.value ?? a.value,
     favorite: b.favorite ?? a.favorite, childIds: b.childIds ?? a.child_ids,
+    note: b.note ?? a.note, minIntervalHours: 'minIntervalHours' in b ? b.minIntervalHours : a.min_interval_hours,
   };
   const o = actionFields(merged);
   await checkChildIds(c, fam, o.childIds);
-  await c.query('UPDATE actions SET theme=$2,title=$3,icon=$4,value=$5,favorite=$6,child_ids=$7 WHERE id=$1',
-    [a.id, o.theme, o.title, o.icon, o.value, o.favorite, o.childIds]);
+  await c.query('UPDATE actions SET theme=$2,title=$3,icon=$4,value=$5,favorite=$6,child_ids=$7,note=$8,min_interval_hours=$9 WHERE id=$1',
+    [a.id, o.theme, o.title, o.icon, o.value, o.favorite, o.childIds, o.note, o.minIntervalHours]);
 }));
 for (const [path, val] of [['archive', 'now()'], ['unarchive', 'NULL']]) {
   dataRouter.post(`/actions/:id/${path}`, mutate(async (req, c, fam) => {

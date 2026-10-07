@@ -48,6 +48,15 @@ GitHub → **Actions → Android APK → Run workflow** (branche `claude/petits-
 
 `versionCode` = numéro d'exécution du workflow (croît à chaque APK). Si vous recréez un jour le dépôt, fixez la variable `ANDROID_VERSION_CODE_OFFSET` (Settings → Variables) au-dessus du dernier build publié.
 
+## APK de test (signature de débogage) — mises à jour
+
+L'artefact `petits-heros-test-android` (workflow *Android APK*, job « Compilation de contrôle ») est un APK **de test** signé avec une clé de **débogage**.
+
+* La clé de débogage est conservée dans le **cache GitHub Actions** (clé `android-debug-keystore-v1`) : les builds de test suivants ont **la même signature** et se mettent à jour **par-dessus** l'ancien. Le cache peut être supprimé par GitHub après 7 jours sans usage : dans ce cas la signature change et il faut désinstaller avant de réinstaller (le résumé du run l'indique : « clé créée à neuf » ou « restaurée »).
+* `versionCode` = numéro d'exécution du workflow : il augmente à chaque build (Android refuse de « rétrograder »).
+* Le **premier** APK de test (run n° 4, `versionCode` 1) était signé par une clé éphémère du runner, aujourd'hui perdue : il faut le **désinstaller une fois**. Idem pour passer plus tard à l'APK de production (clé définitive, autre signature).
+* Désinstaller l'application ne supprime aucune donnée familiale (elles sont sur le serveur) ; il faut seulement se reconnecter.
+
 ## Étape 3 — Installer sur chaque téléphone Android
 
 1. Sur le téléphone, ouvrir la page **Releases** du dépôt (connexion GitHub requise si le dépôt est privé) et télécharger le fichier `petits-heros-….apk`.

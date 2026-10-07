@@ -202,3 +202,9 @@ body.sheet-open { overflow: hidden; }
 .check.sg .tx { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: break-word; hyphens: auto; }
 .check.sg .tx small { display: block; color: var(--muted); font-weight: 500; font-size: .85rem; }
 .check.dim { opacity: .6; }
+
+/* envoi en cours : la fenêtre est figée (aucun second geste possible), le bouton affiche « Enregistrement… » */
+.panel[aria-busy="true"] { pointer-events: none; }
+.panel[aria-busy="true"] .btn[disabled] { opacity: .75; }
+body.busy #app { pointer-events: none; opacity: .75; transition: opacity .15s; }
+.panel.locked .seg, .panel.locked .quick, .panel.locked .row, .panel.locked .stepper, .panel.locked label.f, .panel.locked input { pointer-events: none; opacity: .5; }

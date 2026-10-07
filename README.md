@@ -53,6 +53,7 @@ createdb kids_test
 export TEST_DATABASE_URL=postgres://postgres@localhost:5432/kids_test
 npm test                 # 28 tests : API sur PostgreSQL réel + garde-fous
 npm run redeploy-test    # processus réel arrêté puis relancé : données conservées
+npm run slow-test        # enregistrement des points sous réseau lent / réponse perdue / délai dépassé / clics répétés (Chromium)
 npm run e2e              # « téléphones » Chromium (Playwright requis) : interface, mobile, PWA, sécurité locale
 ```
 

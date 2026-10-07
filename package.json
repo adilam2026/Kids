@@ -1,6 +1,6 @@
 {
   "name": "petits-heros",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Petits Héros — points, défis et récompenses pour la famille (PWA + API + PostgreSQL)",
   "type": "module",
@@ -18,7 +18,8 @@
     "backup": "sh scripts/backup.sh",
     "android:web": "node scripts/build-www.mjs && npx cap sync android",
     "android:icons": "node scripts/make-android-icons.mjs",
-    "native-test": "node test/native-e2e.mjs"
+    "native-test": "node test/native-e2e.mjs",
+    "slow-test": "node test/slow-network.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",

@@ -6,7 +6,7 @@ export async function loadState(c, member, user) {
   const q = async (sql, p = [fam]) => (await c.query(sql, p)).rows;
   const [family] = await q('SELECT id, name, rev, quick_plus, quick_minus FROM families WHERE id=$1');
   const children = await q(`SELECT id, name, avatar, color, age, balance, archived_at IS NOT NULL AS archived FROM children WHERE family_id=$1 ORDER BY created_at`);
-  const actions = await q(`SELECT id, theme, title, icon, value, favorite, child_ids, archived_at IS NOT NULL AS archived FROM actions WHERE family_id=$1 ORDER BY sort, created_at`);
+  const actions = await q(`SELECT id, theme, title, icon, value, note, min_interval_hours, favorite, child_ids, archived_at IS NOT NULL AS archived FROM actions WHERE family_id=$1 ORDER BY sort, created_at`);
   const rewards = await q(`SELECT id, title, icon, cost, child_ids, archived_at IS NOT NULL AS archived FROM rewards WHERE family_id=$1 ORDER BY cost, created_at`);
   const redemptions = await q(
     `SELECT id, reward_id, child_id, title, icon, cost, status, created_at, done_at, tx_id FROM redemptions

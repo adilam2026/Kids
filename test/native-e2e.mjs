@@ -71,9 +71,26 @@ ok(`synchronisation app ↔ web : +5 côté app visible côté web ; +2 côté w
 await P.click('.tabs a:has-text("Défis")'); await P.waitForSelector('text=Aucun défi en cours');
 await P.click('.tabs a:has-text("Récompenses")'); await P.waitForSelector('text=Choisir le jeu familial');
 await P.click('.tabs a:has-text("Famille")'); await P.waitForSelector('text=Application Android · version 1.2.3 (build 7)');
-await P.click('[data-act=suggest]'); await P.waitForSelector('.check.sg'); assert.ok((await P.innerText('[data-act=sgApply]')).includes('Ajouter 13 suggestions'));
+// famille créée AVANT les actions Sommeil / Repas : on retire ces deux lignes par défaut, puis on les ajoute via « Ajouter les suggestions »
+const famId = (await S.query('SELECT family_id FROM children WHERE id=$1', [kids[0]])).rows[0].family_id;
+await S.query(`DELETE FROM actions WHERE family_id=$1 AND title IN ('Faire une nuit complète','Finir son assiette')`, [famId]);
+const snap = async () => JSON.stringify([(await S.query('SELECT id, balance FROM children WHERE family_id=$1 ORDER BY id', [famId])).rows, (await S.query('SELECT count(*) FROM transactions WHERE family_id=$1', [famId])).rows]);
+const before = await snap();
+await P.click('[data-act=suggest]'); await P.waitForSelector('.check.sg');
+const prev = await P.innerText('.panel');
+for (const w of ['Faire une nuit complète', 'Finir son assiette', 'Aucun retrait en cas de réveil', 'On ne force jamais l’enfant s’il n’a plus faim', '1 validation / 12 h', '1 validation / 3 h']) assert.ok(prev.includes(w), `aperçu : « ${w} » absent`);
+assert.ok((await P.innerText('[data-act=sgApply]')).includes('Ajouter 15 suggestions'));
+await P.click('[data-act=sgAll][data-v="0"]');
+await P.click('.check.sg:has-text("Faire une nuit complète") input'); await P.click('.check.sg:has-text("Finir son assiette") input');
+await P.click('[data-act=sgApply]'); await P.waitForSelector('.toast:has-text("2 suggestions ajoutées")');
+const rows = (await S.query(`SELECT title, value, theme, icon, note, min_interval_hours FROM actions WHERE family_id=$1 AND title IN ('Faire une nuit complète','Finir son assiette') ORDER BY title`, [famId])).rows;
+assert.deepEqual(rows.map((r) => [r.title, r.value, r.theme, r.icon, r.min_interval_hours]), [['Faire une nuit complète', 10, 'Sommeil', '🌙', 12], ['Finir son assiette', 3, 'Repas', '🍽️', 3]]);
+assert.equal(await snap(), before, 'soldes et historique inchangés');
+await P.click('[data-act=suggest]'); await P.waitForSelector('.check.sg');
+assert.equal(await P.locator('.check.sg.dim').filter({ hasText: 'Faire une nuit complète' }).count(), 1, 'plus proposées une 2ᵉ fois (aucun doublon)');
+assert.ok((await P.innerText('[data-act=sgApply]')).includes('Ajouter 13 suggestions'));
 await P.keyboard.press('Escape');
-ok('défis, récompenses, suggestions et version de l’application affichés');
+ok('suggestions sur une famille existante : « Faire une nuit complète » (+10, Sommeil) et « Finir son assiette » (+3, Repas) proposées avec leur note, ajoutées sans doublon, soldes et historique inchangés');
 
 // 6. bouton Retour
 await P.click('.tabs a:has-text("Enfants")');

@@ -86,7 +86,7 @@ familyRouter.post('/suggestions/apply', mutate(async (req, c, fam) => {
   const st = await suggestionStatus(c, fam); // recalculé sous le verrou de la famille : pas de doublon, même en concurrence
   let addedA = 0, addedR = 0;
   for (const s of st.actions.filter((x) => aKeys.includes(x.key) && !x.existing)) {
-    await c.query(`INSERT INTO actions(family_id, theme, title, icon, value, sort) VALUES ($1,$2,$3,$4,$5,(SELECT COALESCE(max(sort),0)+1 FROM actions WHERE family_id=$1))`, [fam, s.theme, s.title, s.icon, s.value]);
+    await c.query(`INSERT INTO actions(family_id, theme, title, icon, value, note, min_interval_hours, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT COALESCE(max(sort),0)+1 FROM actions WHERE family_id=$1))`, [fam, s.theme, s.title, s.icon, s.value, s.note || '', s.minIntervalHours ?? null]);
     addedA++;
   }
   for (const s of st.rewards.filter((x) => rKeys.includes(x.key) && !x.existing)) {

@@ -16,7 +16,7 @@ test('création de trois enfants + bibliothèque initiale', async () => {
   const st = await parent.state();
   assert.equal(st.children.length, 3);
   assert.equal(kids.length, 3);
-  assert.equal(st.actions.length, 14);
+  assert.equal(st.actions.length, 16);
   assert.ok(st.actions.some((a) => a.value === -2 && a.theme === 'Malus facultatifs'));
   assert.ok(!st.actions.some((a) => /pleur|apprentissage|besoin/i.test(a.title)), 'aucun malus pour pleurs / apprentissage / besoins');
   assert.equal(st.rewards.length, 3);
@@ -503,6 +503,8 @@ test('réponses API : jamais mises en cache (partagées ou locales)', async () =
 
 test('suggestions : famille déjà créée, aperçu, sélection, sans doublon, sans toucher soldes/historique/récompenses perso', async () => {
   const { parent, kids } = await newFamily(S.base);
+  // famille créée AVANT l'ajout des actions « Sommeil » et « Repas » : on retire ces deux lignes par défaut
+  await S.query(`DELETE FROM actions WHERE family_id=$1 AND title IN ('Faire une nuit complète','Finir son assiette')`, [(await parent.state()).family.id]);
   await parent.post(`/api/children/${kids[0]}/points`, { value: 7 });
   const g = await parent.post(`/api/children/${kids[1]}/points`, { value: 3 });
   await parent.post(`/api/transactions/${g.body.txId}/cancel`);
@@ -515,14 +517,15 @@ test('suggestions : famille déjà créée, aperçu, sélection, sans doublon, s
 
   const prev = (await parent.get('/api/family/suggestions')).body;
   const by = (arr, k) => arr.find((x) => x.key === k);
-  assert.equal(prev.actions.length, 10); assert.equal(prev.rewards.length, 6);
+  assert.equal(prev.actions.length, 12); assert.equal(prev.rewards.length, 6);
   assert.ok(by(prev.actions, 'ranger-jouets').existing, 'doublon exact détecté');
   assert.ok(by(prev.actions, 's-habiller-aide').existing, 'doublon par alias détecté (ancien intitulé)');
   assert.ok(by(prev.rewards, 'jeu-familial').existing && by(prev.rewards, 'jeu-familial').existing.cost === 12);
-  assert.equal(prev.actions.filter((a) => !a.existing).length, 8);
+  assert.equal(prev.actions.filter((a) => !a.existing).length, 10);
+  assert.ok(!by(prev.actions, 'nuit-complete').existing && !by(prev.actions, 'finir-assiette').existing, 'les deux nouvelles actions sont proposées');
   assert.equal(prev.rewards.filter((a) => !a.existing).length, 5);
   assert.deepEqual(prev.actions.filter((a) => a.malus).map((a) => a.value), [-1, -1, -1, -1]);
-  assert.deepEqual(prev.actions.filter((a) => !a.malus).map((a) => a.value), [1, 2, 2, 1, 2, 2]);
+  assert.deepEqual(prev.actions.filter((a) => !a.malus).map((a) => a.value), [1, 2, 2, 1, 2, 2, 10, 3]);
   assert.deepEqual(prev.rewards.map((r) => r.cost), [5, 10, 10, 10, 15, 20]);
 
   // aucune écriture à l'aperçu ; sélection partielle seulement
@@ -536,12 +539,12 @@ test('suggestions : famille déjà créée, aperçu, sélection, sans doublon, s
   const all = { actionKeys: prev.actions.map((a) => a.key), rewardKeys: prev.rewards.map((a) => a.key) };
   const rs = await Promise.all([1, 2, 3].map(() => parent.post('/api/family/suggestions/apply', all)));
   assert.ok(rs.every((r) => r.status === 200));
-  assert.equal(rs.reduce((n, r) => n + r.body.addedActions + r.body.addedRewards, 0), 6 + 4, 'ajoutées une seule fois au total');
+  assert.equal(rs.reduce((n, r) => n + r.body.addedActions + r.body.addedRewards, 0), 8 + 4, 'ajoutées une seule fois au total');
   assert.equal((await parent.post('/api/family/suggestions/apply', all)).body.addedActions, 0);
   st = await parent.state();
   const dup = (rows) => rows.map((r) => r.title.toLowerCase()).filter((t, i, a) => a.indexOf(t) !== i);
   assert.deepEqual(dup(st.actions), []); assert.deepEqual(dup(st.rewards), []);
-  assert.equal(st.actions.length, 22); assert.equal(st.rewards.length, 9); // 3 d’origine + pizza perso + 5 nouvelles
+  assert.equal(st.actions.length, 24); assert.equal(st.rewards.length, 9); // 3 d’origine + pizza perso + 5 nouvelles
   assert.equal(st.rewards.find((r) => r.title === 'Choisir le jeu familial').cost, 12, 'récompense personnalisée conservée');
   assert.equal(st.rewards.find((r) => r.id === custom.body.id).title, 'Soirée pizza');
   const m = st.actions.find((a) => a.title === 'Arracher un jouet des mains'); assert.equal(m.value, -1); assert.equal(m.theme, 'Malus facultatifs');
@@ -560,7 +563,7 @@ test('suggestions : famille déjà créée, aperçu, sélection, sans doublon, s
   assert.equal((await parent.post('/api/family/suggestions/apply', { actionKeys: ['nimporte-quoi'] })).status, 400);
   assert.equal((await parent.post('/api/family/suggestions/apply', {})).status, 400);
   const other = await newFamily(S.base, 'sg');
-  assert.equal((await other.parent.state()).actions.length, 14);
+  assert.equal((await other.parent.state()).actions.length, 16);
   assert.equal((await new Client(S.base).get('/api/family/suggestions')).status, 401);
 });
 
@@ -583,4 +586,46 @@ test('session glissante : le cookie est prolongé en même temps que la session'
   const sc = r.headers.getSetCookie()[0] || '';
   assert.match(sc, /ph_session=/); assert.match(sc, /Max-Age=7776000/); assert.match(sc, /HttpOnly/); assert.match(sc, /SameSite=Lax/);
   assert.equal((await parent.get('/api/auth/me')).body.user.name, 'Maman');
+});
+
+test('actions Sommeil / Repas : prédéfinies, validation manuelle limitée par un délai, aucun malus', async () => {
+  const { parent, kids } = await newFamily(S.base);
+  const st = await parent.state();
+  const nuit = st.actions.find((a) => a.title === 'Faire une nuit complète'), repas = st.actions.find((a) => a.title === 'Finir son assiette');
+  assert.equal(nuit.value, 10); assert.equal(nuit.theme, 'Sommeil'); assert.equal(nuit.icon, '🌙'); assert.equal(nuit.min_interval_hours, 12); assert.match(nuit.note, /Aucun retrait en cas de réveil/);
+  assert.equal(repas.value, 3); assert.equal(repas.theme, 'Repas'); assert.equal(repas.icon, '🍽️'); assert.equal(repas.min_interval_hours, 3); assert.match(repas.note, /ne force jamais/);
+  assert.ok(!st.actions.some((a) => a.value < 0 && /nuit|sommeil|réveil|assiette|repas|manger/i.test(a.title)), 'aucun malus lié au sommeil ni aux repas');
+  // une validation par nuit, par enfant
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 10, actionId: nuit.id })).status, 200);
+  const again = await parent.post(`/api/children/${kids[0]}/points`, { value: 10, actionId: nuit.id });
+  assert.equal(again.status, 409); assert.equal(again.body.code, 'too_soon'); assert.match(again.body.error, /déjà été validé/);
+  assert.equal((await parent.post(`/api/children/${kids[1]}/points`, { value: 10, actionId: nuit.id })).status, 200, 'un autre enfant n’est pas concerné');
+  assert.equal((await parent.state()).children.find((c) => c.id === kids[0]).balance, 10);
+  // une validation annulée ne compte pas
+  const h = (await parent.get(`/api/children/${kids[0]}/history`)).body.items[0];
+  await parent.post(`/api/transactions/${h.id}/cancel`);
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 10, actionId: nuit.id })).status, 200);
+  // le délai passé, la validation redevient possible (la nuit suivante)
+  await S.query(`UPDATE transactions SET created_at = now() - interval '13 hours' WHERE child_id=$1 AND action_id=$2`, [kids[0], nuit.id]);
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 10, actionId: nuit.id })).status, 200);
+  // repas : une validation par repas (3 h), indépendante de la nuit
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 3, actionId: repas.id })).status, 200);
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 3, actionId: repas.id })).status, 409);
+  // tout est personnalisable : intitulé, valeur, note, délai ; délai retiré → plusieurs validations possibles
+  assert.equal((await parent.patch(`/api/actions/${repas.id}`, { title: 'Bien manger', value: 2, note: 'à notre façon', minIntervalHours: null })).status, 200);
+  const edited = (await parent.state()).actions.find((a) => a.id === repas.id);
+  assert.equal(edited.title, 'Bien manger'); assert.equal(edited.value, 2); assert.equal(edited.note, 'à notre façon'); assert.equal(edited.min_interval_hours, null);
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 2, actionId: repas.id })).status, 200);
+  assert.equal((await parent.post(`/api/children/${kids[0]}/points`, { value: 2, actionId: repas.id })).status, 200);
+  assert.equal((await parent.patch(`/api/actions/${repas.id}`, { minIntervalHours: 0 })).status, 400);
+  assert.equal((await parent.patch(`/api/actions/${repas.id}`, { minIntervalHours: 200 })).status, 400);
+  assert.equal((await parent.patch(`/api/actions/${repas.id}`, { minIntervalHours: 6, note: 'x'.repeat(200) })).status, 400);
+  assert.equal((await parent.patch(`/api/actions/${repas.id}`, { minIntervalHours: 6 })).status, 200);
+  assert.equal((await parent.post('/api/actions', { theme: 'Sommeil', title: 'Sieste', icon: '😴', value: 1, note: 'ok', minIntervalHours: 4 })).status, 200);
+  // le même identifiant d'opération rejoué ne déclenche pas la règle (réponse mémorisée) ni de doublon
+  const op = crypto.randomUUID();
+  const a1 = await parent.post(`/api/children/${kids[2]}/points`, { value: 10, actionId: nuit.id }, { op });
+  const a2 = await parent.post(`/api/children/${kids[2]}/points`, { value: 10, actionId: nuit.id }, { op });
+  assert.equal(a1.status, 200); assert.equal(a2.status, 200); assert.equal(a2.body.replayed, true);
+  assert.equal((await parent.state()).children.find((c) => c.id === kids[2]).balance, 10);
 });

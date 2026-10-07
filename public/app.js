@@ -50,6 +50,8 @@ function readCache(userId) {
 }
 
 // ---------- API ----------
+// Délai maximal d'une requête : au-delà, l'issue est INCONNUE (le serveur a peut-être enregistré) → on propose de réessayer avec le MÊME identifiant d'opération.
+const REQUEST_TIMEOUT = Number(window.PH_TIMEOUT_MS) || 20000;
 const intents = new Map(); // intention -> identifiant d'opération (conservé tant que la réponse du serveur est inconnue)
 class ApiError extends Error { constructor(m, status, code) { super(m); this.status = status; this.code = code; } }
 
@@ -62,16 +64,18 @@ async function api(method, path, body, key) {
     if (!intents.has(k)) intents.set(k, uid());
     headers['x-op-id'] = intents.get(k);
   }
-  let r;
+  let r, j = null;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT);
   try {
-    r = await fetch(API_BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), credentials: NATIVE ? 'omit' : 'same-origin' });
-  } catch {
-    markOffline(true); // l'opération reste identifiable : un nouvel essai ne créera pas de doublon
-    throw new ApiError(method === 'GET' ? 'Pas de connexion.' : 'Pas de connexion : rien n’a été enregistré. Réessaie.', 0, 'network');
-  }
+    r = await fetch(API_BASE + path, { method, headers, signal: ctl.signal, body: body === undefined ? undefined : JSON.stringify(body), credentials: NATIVE ? 'omit' : 'same-origin' });
+    try { j = await r.json(); } catch { /* corps vide */ }
+  } catch (e) {
+    // L'intention (identifiant d'opération) est CONSERVÉE : réessayer ne peut pas créer de doublon.
+    if (e?.name === 'AbortError') throw new ApiError(method === 'GET' ? 'Le serveur met trop de temps à répondre.' : 'Le serveur met trop de temps à répondre : l’enregistrement n’est pas confirmé. Réessaie : même si la première demande est passée, aucun doublon ne sera créé.', 0, 'timeout');
+    markOffline(true);
+    throw new ApiError(method === 'GET' ? 'Pas de connexion.' : 'Réponse non reçue (connexion perdue) : l’enregistrement n’est pas confirmé. Réessaie : même si la première demande est passée, aucun doublon ne sera créé.', 0, 'network');
+  } finally { clearTimeout(timer); }
   markOffline(false);
-  let j = null;
-  try { j = await r.json(); } catch { /* corps vide */ }
   if (key) intents.delete(key); // réponse reçue : l'intention est réglée
   if (r.status === 426) { S.upgrade = true; render(); throw new ApiError(j?.error || 'Mise à jour nécessaire', 426, 'upgrade_required'); }
   if (NATIVE && j?.token) { S.token = j.token; await window.PHNative.setToken(j.token); }
@@ -508,7 +512,7 @@ function libraryView() {
   const acts = S.st.actions;
   const themes = [...new Set(acts.filter((a) => !a.archived).map((a) => a.theme))];
   const row = (a) => `<div class="row" style="cursor:default"><div class="ic">${a.icon}</div>
-    <div class="tx">${esc(a.title)}<small>${a.child_ids.length ? a.child_ids.map((id) => kid(id)?.name).filter(Boolean).join(', ') : 'Tous les enfants'}</small></div>
+    <div class="tx">${esc(a.title)}<small>${a.child_ids.length ? a.child_ids.map((id) => kid(id)?.name).filter(Boolean).join(', ') : 'Tous les enfants'}${a.min_interval_hours ? ` · 1 validation / ${a.min_interval_hours} h` : ''}</small>${a.note ? `<small>${esc(a.note)}</small>` : ''}</div>
     <span class="val ${a.value > 0 ? 'p' : 'n'}">${signed(a.value)}</span>
     <button class="icon-btn${nm()}" data-act="favAction" data-id="${a.id}" aria-label="Favori">${a.favorite ? '⭐' : '☆'}</button>
     <button class="icon-btn${nm()}" data-act="actionForm" data-id="${a.id}" aria-label="Modifier">✏️</button></div>`;
@@ -527,6 +531,8 @@ function libraryView() {
 function closeSheetQuiet() { S.sheet = null; document.body.classList.remove('sheet-open'); $('#sheet').innerHTML = ''; }
 function clearToast() { clearTimeout(toastTimer); $('#toast').innerHTML = ''; S.undo = null; }
 function openSheet(s) { clearToast(); S.sheet = { op: uid(), error: '', ...s }; document.body.classList.add('sheet-open'); renderSheet(); }
+// Fermeture demandée par l'utilisateur (✕, fond, Échap, Retour) : refusée pendant un envoi. Les fermetures du code (après succès) restent libres.
+const userClose = () => { if (S.sheet?.pending) return; closeSheet(); };
 function closeSheet() { S.sheet = null; document.body.classList.remove('sheet-open'); $('#sheet').innerHTML = ''; render(); }
 function renderSheet(fromPoll) {
   if (fromPoll) return; // on ne touche pas à une saisie en cours ; la vue se met à jour à la fermeture
@@ -534,6 +540,7 @@ function renderSheet(fromPoll) {
   const bodies = { suggest: suggestSheet, regen: regenSheet, points: pointsSheet, childForm, actionForm, challengeForm, rewardForm, quickForm, invite: inviteSheet, invites: invitesSheet,
     memberMenu, chpw: chpwSheet, install: installSheet, lockSet: () => pinSheet(true), unlock: () => pinSheet(false), confirm: confirmSheet, info: infoSheet };
   const [title, html] = bodies[s.kind](s);
+  queueMicrotask(() => { if (S.sheet === s && s.sent) lockPanel(); });
   $('#sheet').innerHTML = `<div class="backdrop" data-act="closeBackdrop"><div class="panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
     <div class="panel-head"><h2>${title}</h2><button class="icon-btn" data-act="closeSheet" aria-label="Fermer">✕</button></div>
     <div id="sheet-err">${s.error ? `<div class="err">${esc(s.error)}</div>` : ''}</div>${html}</div></div>`;
@@ -553,10 +560,16 @@ function pointsValid(s) {
   return true;
 }
 function confirmBar(s) {
-  const c = kid(s.childId), ok = pointsValid(s);
+  const c = kid(s.childId);
+  if (s.sent) { // issue inconnue d'un envoi précédent : on ne peut renvoyer QUE la même demande (même identifiant d'opération)
+    return `<div class="err">⚠️ Enregistrement non confirmé : ${signed(s.sent.value)} pour ${esc(c.name)}. Réessaie : même si la première demande est passée, aucun doublon ne sera créé.</div>
+      <button class="btn primary block${nm()}" data-act="pointsConfirm" data-submit ${s.pending ? 'disabled' : ''}>${s.pending ? PENDING_LABEL : `Réessayer ${signed(s.sent.value)} pour ${esc(c.name)}`}</button>
+      <button class="link small" data-act="discardSent">Abandonner cette tentative (seulement si l’historique n’affiche pas ce mouvement)</button>`;
+  }
+  const ok = pointsValid(s);
   const over = s.sign === '-' && Number.isInteger(s.value) && -s.value > c.balance;
   return `${over ? `<div class="err">${esc(c.name)} n’a que ${pts(c.balance)} : corrige le montant.</div>` : ''}
-    <button class="btn primary block${nm()}" data-act="pointsConfirm" ${ok && !over ? '' : 'disabled'}>${ok ? `Confirmer ${signed(s.value)} pour ${esc(c.name)}` : 'Choisis une valeur'}</button>`;
+    <button class="btn primary block${nm()}" data-act="pointsConfirm" data-submit ${ok && !over && !s.pending ? '' : 'disabled'}>${s.pending ? PENDING_LABEL : ok ? `Enregistrer ${signed(s.value)} pour ${esc(c.name)}` : 'Choisis une valeur'}</button>`;
 }
 function pointsSheet(s) {
   const c = kid(s.childId), plus = s.sign === '+', st = S.st;
@@ -566,7 +579,7 @@ function pointsSheet(s) {
   const reason = (req) => `<label class="f">Motif${req ? ' (obligatoire)' : ' (facultatif)'}</label><input type="text" data-bind="reason" maxlength="120" value="${esc(s.reason || '')}" placeholder="${plus ? 'Bravo pour…' : 'Ce qui s’est passé…'}">`;
   const list = (acts) => {
     const fav = acts.filter((a) => a.favorite), themes = [...new Set(acts.map((a) => a.theme))];
-    const r = (a) => `<button class="row ${s.actionId === a.id ? 'on' : ''}" data-act="pickAction" data-id="${a.id}"><div class="ic">${a.icon}</div><div class="tx">${esc(a.title)}</div><span class="val ${a.value > 0 ? 'p' : 'n'}">${signed(a.value)}</span></button>`;
+    const r = (a) => `<button class="row ${s.actionId === a.id ? 'on' : ''}" data-act="pickAction" data-id="${a.id}"><div class="ic">${a.icon}</div><div class="tx">${esc(a.title)}${a.note ? `<small>${esc(a.note)}</small>` : ''}</div><span class="val ${a.value > 0 ? 'p' : 'n'}">${signed(a.value)}</span></button>`;
     return `${fav.length ? `<div class="theme">⭐ Favoris</div>${fav.map(r).join('')}` : ''}${themes.map((t) => `<div class="theme">${esc(t)}</div>${acts.filter((a) => a.theme === t).map(r).join('')}`).join('')}
       ${s.actionId ? `<div class="stepper"><button data-act="step" data-d="-1">−</button><b>${signed(s.value)}</b><button data-act="step" data-d="1">+</button></div>` : ''}
       ${acts.length ? '' : '<div class="empty small">Aucune action. Ajoute-en dans Famille › Bibliothèque.</div>'}`;
@@ -600,6 +613,8 @@ function actionForm(s) {
     <label class="f">Thème</label><input type="text" name="theme" required maxlength="40" list="themes" value="${esc(s.theme || '')}"><datalist id="themes">${themes.map((t) => `<option value="${esc(t)}">`).join('')}</datalist>
     <label class="f">Icône</label>${picker('icon', ICONS, s.icon)}
     <label class="f">Valeur suggérée (négative = retrait)</label><input type="number" name="value" required inputmode="numeric" value="${s.value ?? 2}">
+    <label class="f">Note pour les parents (facultatif)</label><input type="text" name="note" maxlength="160" value="${esc(s.note || '')}" placeholder="Ex. portion adaptée, sans forcer">
+    <label class="f">Délai minimum entre deux validations, pour un même enfant (heures, facultatif)</label><input type="number" name="minIntervalHours" min="1" max="72" inputmode="numeric" value="${s.min_interval_hours ?? ''}" placeholder="aucun">
     <label class="check" style="margin-top:12px"><input type="checkbox" name="favorite" ${s.favorite ? 'checked' : ''}>⭐ Favori</label>
     <label class="f">Enfants concernés (aucun coché = tous)</label>${kidChecks(s.child_ids || [])}
     <button class="btn primary block${nm()}" style="margin-top:14px">Enregistrer</button>
@@ -667,7 +682,7 @@ function suggestSheet(s) {
     const ex = it.existing, val = kind === 'r' ? `${it.cost} pts` : signed(it.value);
     const note = ex ? `<small>Déjà présent${ex.archived ? ' (archivé)' : ''}${(kind === 'r' ? ex.cost !== it.cost : ex.value !== it.value) ? ` · ta valeur : ${kind === 'r' ? `${ex.cost} pts` : signed(ex.value)}` : ''} — conservé tel quel</small>` : `<small>${esc(it.theme || 'Catalogue')}</small>`;
     return `<label class="check sg ${ex ? 'dim' : ''}"><input type="checkbox" data-act="sgToggle" data-id="${kind}${it.key}" ${ex ? 'disabled' : ''} ${s.sel[kind + it.key] ? 'checked' : ''}>
-      <span class="ic">${it.icon}</span><span class="tx">${esc(it.title)}${note}</span><span class="val ${kind === 'r' ? '' : it.value > 0 ? 'p' : 'n'}">${val}</span></label>`;
+      <span class="ic">${it.icon}</span><span class="tx">${esc(it.title)}${note}${it.note && !ex ? `<small>${esc(it.note)}${it.minIntervalHours ? ` (1 validation / ${it.minIntervalHours} h)` : ''}</small>` : ''}</span><span class="val ${kind === 'r' ? '' : it.value > 0 ? 'p' : 'n'}">${val}</span></label>`;
   };
   const good = s.data.actions.filter((a) => !a.malus), mal = s.data.actions.filter((a) => a.malus);
   return ['Ajouter les suggestions', `<p class="muted small">Coche ce que tu veux ajouter. <b>Rien n’est modifié ni supprimé</b> : tes actions, récompenses, soldes et historique restent tels quels, et tu pourras tout changer ensuite.</p>
@@ -679,7 +694,7 @@ function suggestSheet(s) {
     <div class="confirm-bar" id="sgslot">${sgBar(s)}</div>`];
 }
 const sgCount = (s) => Object.values(s.sel).filter(Boolean).length;
-const sgBar = (s) => `<button class="btn primary block${nm()}" data-act="sgApply" ${sgCount(s) ? '' : 'disabled'}>${sgCount(s) ? `Ajouter ${sgCount(s)} suggestion${sgCount(s) > 1 ? 's' : ''}` : 'Rien de sélectionné'}</button>`;
+const sgBar = (s) => `<button class="btn primary block${nm()}" data-act="sgApply" data-submit ${sgCount(s) && !s.pending ? '' : 'disabled'}>${s.pending ? PENDING_LABEL : sgCount(s) ? `Ajouter ${sgCount(s)} suggestion${sgCount(s) > 1 ? 's' : ''}` : 'Rien de sélectionné'}</button>`;
 function regenSheet(s) {
   if (s.codes) return ['Nouveaux codes de secours', `<p><b>Note-les maintenant</b> : les anciens sont invalidés et ceux-ci ne seront plus affichés.</p><div class="recovery">${s.codes.map((c) => `<code>${esc(c)}</code>`).join('')}</div>
     <button class="btn block" data-act="copyRegen">📋 Copier</button><button class="btn primary block" style="margin-top:10px" data-act="closeSheet">J’ai noté mes codes</button>`];
@@ -723,17 +738,42 @@ async function saveFile(name, mime, text) {
   a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 const errMsg = (e) => e.message || 'Erreur';
+// ---- Envoi en cours : un seul clic = une seule requête ; bouton désactivé « Enregistrement… » ; fenêtre figée ----
+const PENDING_LABEL = 'Enregistrement…';
+function lockPanel() {
+  const panel = document.querySelector('#sheet .panel'); if (!panel) return;
+  panel.classList.add('locked'); panel.querySelectorAll('input, select, textarea').forEach((i) => { i.disabled = true; });
+}
+function setPending(on) {
+  const sh = S.sheet; if (!sh) return;
+  sh.pending = on;
+  const panel = document.querySelector('#sheet .panel'); if (!panel) return;
+  panel.setAttribute('aria-busy', String(on));
+  panel.querySelectorAll('.btn.primary, .btn.danger.block, [data-submit]').forEach((b) => {
+    if (on) { if (b.dataset.label === undefined) { b.dataset.label = b.innerHTML; b.dataset.was = b.disabled ? '1' : ''; } b.disabled = true; b.textContent = PENDING_LABEL; }
+    else if (b.dataset.label !== undefined) { b.innerHTML = b.dataset.label; b.disabled = !!b.dataset.was; delete b.dataset.label; delete b.dataset.was; }
+  });
+  if (!on) { if (sh.kind === 'points' && $('#cslot')) $('#cslot').innerHTML = confirmBar(sh); if (sh.kind === 'suggest' && $('#sgslot')) $('#sgslot').innerHTML = sgBar(sh); }
+}
+const setBusyBody = (on) => document.body.classList.toggle('busy', on);
 async function run(fn) {
   if (S.busy) return;
   S.busy = true;
+  const sheet = S.sheet;
+  if (sheet) setPending(true); else setBusyBody(true);
   try { return await fn(); }
-  catch (e) { if (S.sheet) sheetErr(errMsg(e)); else toast(esc(errMsg(e)), { error: true }); }
-  finally { S.busy = false; }
+  catch (e) {
+    if (sheet && S.sheet === sheet) { setPending(false); sheetErr(errMsg(e)); } else toast(esc(errMsg(e)), { error: true });
+  } finally {
+    S.busy = false; setBusyBody(false);
+    if (S.sheet && S.sheet.pending) setPending(false);
+  }
 }
-// Envoie une écriture ; la feuille ne se ferme qu'après confirmation du serveur.
+// Envoie une écriture. La fonction ne rend la main qu'après CONFIRMATION du serveur ; l'actualisation de l'état qui suit
+// ne bloque jamais plus de 1,2 s (elle se poursuit en arrière-plan) : la fenêtre se ferme dès que le serveur a répondu.
 async function write(method, path, body, key) {
   const r = await api(method, path, body, key ?? S.sheet?.op);
-  await refresh(true);
+  await Promise.race([refresh(true), new Promise((res) => setTimeout(res, 1200))]);
   return r;
 }
 const sha = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -742,8 +782,8 @@ const ask = (title, text, label, onYes, danger = true) => openSheet({ kind: 'con
 const act = (el) => el.dataset;
 
 const A = {
-  closeSheet: closeSheet,
-  closeBackdrop: (d, el, ev) => { if (ev.target === el) closeSheet(); },
+  closeSheet: userClose,
+  closeBackdrop: (d, el, ev) => { if (ev.target === el) userClose(); },
   auth: (d) => { S.auth = { mode: d.mode, error: '', info: '' }; render(); },
   logout: async () => { try { await api('POST', '/api/auth/logout', {}); } catch { /* déjà déconnecté */ } wipeLocal(); S.me = null; S.auth = { mode: 'login', error: '', info: '' }; go('#/'); render(); },
 
@@ -788,22 +828,40 @@ const A = {
   recoveryRegen: () => openSheet({ kind: 'regen' }),
 
   // points
-  points: (d) => { const plus = d.sign === '+'; openSheet({ kind: 'points', childId: d.id, sign: d.sign, tab: plus ? 'free' : 'behavior', value: null, reason: '', actionId: null }); },
+  points: (d) => {
+    const plus = d.sign === '+', u = S.unresolved?.[d.id];
+    if (u) { openSheet({ kind: 'points', childId: d.id, sign: u.body.value > 0 ? '+' : '-', tab: u.tab, op: u.op, sent: u.body, value: u.body.value, reason: u.body.reason || '', actionId: u.body.actionId || null }); return; }
+    openSheet({ kind: 'points', childId: d.id, sign: d.sign, tab: plus ? 'free' : 'behavior', value: null, reason: '', actionId: null });
+  },
   tab: (d) => { Object.assign(S.sheet, { tab: d.t, value: null, actionId: null, error: '' }); renderSheet(); },
   quickVal: (d) => { S.sheet.value = Number(d.v); renderSheet(); },
   pickAction: (d) => { const a = S.st.actions.find((x) => x.id === d.id); Object.assign(S.sheet, { actionId: a.id, value: a.value, reason: '' }); renderSheet(); },
   step: (d) => { const s = S.sheet; const n = s.value + Number(d.d) * (s.sign === '+' ? 1 : -1); if (Math.sign(n) === Math.sign(s.value) && n !== 0) { s.value = n; renderSheet(); } },
+  discardSent: () => { const s = S.sheet; delete S.unresolved?.[s.childId]; s.sent = null; s.op = uid(); s.error = ''; renderSheet(); },
   pointsConfirm: () => run(async () => {
-    const s = S.sheet; if (!pointsValid(s)) return;
+    const s = S.sheet; if (!s.sent && !pointsValid(s)) return;
     const c = kid(s.childId);
-    const body = { value: s.value, reason: s.reason || undefined, actionId: s.actionId || undefined, bonus: s.tab === 'bonus' || undefined };
-    const r = await write('POST', `/api/children/${s.childId}/points`, body);
+    const body = s.sent || { value: s.value, reason: s.reason || undefined, actionId: s.actionId || undefined, bonus: s.tab === 'bonus' || undefined };
+    // 1) enregistrement : une seule requête, identifiant d'opération propre à CETTE fenêtre (réessai = même identifiant = jamais de doublon)
+    let r;
+    try { r = await api('POST', `/api/children/${s.childId}/points`, body, s.op); }
+    catch (e) {
+      if (e.status === 0) { // réseau perdu / délai dépassé : le serveur a peut-être enregistré → seul un réessai identique est permis
+        s.sent = body; (S.unresolved ||= {})[s.childId] = { op: s.op, body, tab: s.tab }; lockPanel();
+      } else { s.sent = null; delete S.unresolved?.[s.childId]; }
+      throw e;
+    }
+    delete S.unresolved?.[s.childId];
+    // 2) le serveur a confirmé : solde affiché tout de suite à partir de sa réponse, fenêtre fermée, message de réussite
+    const known = S.st.children.find((x) => x.id === r.childId); if (known) known.balance = r.balance;
     closeSheetQuiet();
     const gain = r.value > 0;
     if (gain) S.pulse = c.id;
     render();
     if (gain) celebrate(r.type === 'bonus');
     toast(`<b>${esc(c.name)}</b> : ${signed(r.value)} → ${pts(r.balance)}`, { undo: () => undoPost(`/api/transactions/${r.txId}/cancel`) });
+    // 3) resynchronisation complète en arrière-plan (jamais bloquante)
+    refresh(true);
   }),
   undo: () => { const u = S.undo; $('#toast').innerHTML = ''; S.undo = null; if (u) run(u); },
   cancelTx: (d) => ask('Annuler ce mouvement ?', 'Une écriture inverse est ajoutée à l’historique ; le mouvement d’origine reste visible.', 'Oui, annuler', () => undoPost(`/api/transactions/${d.id}/cancel`)),
@@ -884,9 +942,10 @@ const A = {
   }),
 };
 async function undoPost(path) {
-  await api('POST', path, {});
-  await refresh(true); render();
-  toast('Annulé ↩️');
+  const r = await api('POST', path, {});
+  const known = r.childId && S.st?.children.find((x) => x.id === r.childId); if (known && Number.isInteger(r.balance)) known.balance = r.balance;
+  render(); toast('Annulé ↩️');
+  refresh(true);
 }
 
 // ---------- formulaires ----------
@@ -911,7 +970,8 @@ const F = {
     await write(s.id ? 'PATCH' : 'POST', s.id ? `/api/children/${s.id}` : '/api/children', body); closeSheet();
   },
   action: async (f) => {
-    const s = S.sheet, body = { title: f.title.value, theme: f.theme.value, icon: s.icon, value: Number(f.value.value), favorite: f.favorite.checked, childIds: checkedKids(f) };
+    const s = S.sheet, body = { title: f.title.value, theme: f.theme.value, icon: s.icon, value: Number(f.value.value), favorite: f.favorite.checked, childIds: checkedKids(f),
+      note: f.note.value, minIntervalHours: f.minIntervalHours.value === '' ? null : Number(f.minIntervalHours.value) };
     await write(s.id ? 'PATCH' : 'POST', s.id ? `/api/actions/${s.id}` : '/api/actions', body); closeSheet();
   },
   reward: async (f) => {
@@ -943,8 +1003,17 @@ document.addEventListener('submit', (e) => {
   if (!fn || S.busy) return;
   const auth = !S.sheet && ['login', 'register', 'join', 'forgot', 'reset', 'recover', 'newfamily', 'joincode'].includes(f.dataset.form);
   S.busy = true;
-  fn(f).catch((err) => { if (S.sheet) sheetErr(errMsg(err)); else if (auth) { S.auth.error = errMsg(err); render(); } else toast(esc(errMsg(err)), { error: true }); })
-    .finally(() => { S.busy = false; });
+  const sheet = S.sheet, btns = [...f.querySelectorAll('button:not([type=button])')];
+  if (sheet) setPending(true);
+  else btns.forEach((b) => { b.dataset.label = b.innerHTML; b.disabled = true; b.textContent = auth ? 'Patientez…' : PENDING_LABEL; });
+  fn(f).catch((err) => {
+    if (sheet && S.sheet === sheet) { setPending(false); sheetErr(errMsg(err)); }
+    else if (auth) { S.auth.error = errMsg(err); render(); } else toast(esc(errMsg(err)), { error: true });
+  }).finally(() => {
+    S.busy = false;
+    if (S.sheet && S.sheet.pending) setPending(false);
+    btns.forEach((b) => { if (b.isConnected && b.dataset.label !== undefined) { b.innerHTML = b.dataset.label; b.disabled = false; delete b.dataset.label; } });
+  });
 });
 document.addEventListener('input', (e) => {
   const b = e.target.dataset?.bind; if (!b || !S.sheet) return;
@@ -953,14 +1022,23 @@ document.addEventListener('input', (e) => {
   const slot = $('#cslot'); if (slot) slot.innerHTML = confirmBar(S.sheet);
   document.querySelectorAll('.quick button').forEach((q) => q.classList.toggle('on', Number(q.dataset.v) === S.sheet.value));
 });
-window.addEventListener('hashchange', () => { clearToast(); S.hist = null; if (!S.sheet) render(); else closeSheet(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { clearToast(); S.hist = null; if (!S.sheet) render(); else userClose(); window.scrollTo(0, 0); });
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.installEvt = e; });
 window.addEventListener('appinstalled', () => { S.installEvt = null; if (!S.sheet) render(); toast('Application installée ✓'); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.sheet) closeSheet(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.sheet) userClose();
+  // Entrée dans un champ de saisie des points = enregistrer (un seul geste, sans viser le bouton)
+  if (e.key === 'Enter' && S.sheet?.kind === 'points' && e.target.matches?.('input[data-bind]') && pointsValid(S.sheet)) { e.preventDefault(); A.pointsConfirm(); }
+});
+// Toucher le bouton d'envoi ne doit pas retirer le focus du champ : sinon le clavier se referme, la mise en page change
+// sous le doigt et le premier appui est perdu (il fallait appuyer deux fois). Le clic est conservé.
+document.addEventListener('pointerdown', (e) => {
+  if (e.target.closest?.('.panel [data-submit], .panel form .btn.primary') && document.activeElement?.matches?.('input, textarea, select')) e.preventDefault();
+});
 
 // bouton Retour Android : ferme d'abord la fenêtre ouverte, remonte d'un niveau, puis quitte à la racine
 function handleBack() {
-  if (S.sheet) { closeSheet(); return; }
+  if (S.sheet) { userClose(); return; }
   if (S.me && S.recovery) return; // codes de secours : il faut les valider
   if (!S.me) { if (S.auth.mode !== 'login') { S.auth = { mode: 'login', error: '', info: '' }; render(); } else window.PHNative.exit(); return; }
   if (!S.me.membership || S.me.membership.status !== 'active') { window.PHNative.exit(); return; }

@@ -46,11 +46,51 @@ jobs:
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
       - run: npm ci
+      - name: "Numéro de version (croissant à chaque build, condition d'une mise à jour directe)"
+        run: |
+          echo "VERSION_NAME=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$(( ${{ github.run_number }} + ${{ vars.ANDROID_VERSION_CODE_OFFSET || 0 }} ))" >> "$GITHUB_ENV"
+      # Sans cela, chaque exécution génère une NOUVELLE clé de débogage (runner éphémère) : aucun APK de test ne pourrait remplacer le précédent.
+      # La clé de débogage est sans valeur (jamais utilisée pour la production) ; elle n'est pas dans le dépôt, seulement dans le cache Actions.
+      - name: Clé de débogage persistante (même signature d'un APK de test à l'autre)
+        id: dk
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
       - name: Interface embarquée + synchronisation Capacitor
         run: npm run android:web
       - name: Compiler (assembleDebug)
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
+      - name: Vérifier l'APK produit (contenu embarqué, identité, version, signature)
+        env:
+          KEY_RESTORED: ${{ steps.dk.outputs.cache-hit }}
+        run: |
+          APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
+          has() { [ "$(unzip -p "$APK" "$1" | grep -c -F -- "$2")" -ge 1 ] || { echo "::error title=APK incomplet::« $2 » introuvable dans $1"; exit 1; }; }
+          has assets/public/app.js "J’ai un code d’invitation"      # parcours « rejoindre ma famille avec un code »
+          has assets/public/app.js 'data-form="join"'
+          has assets/public/app.js 'data-form="joincode"'
+          has assets/public/app.js "Enregistrement…"                  # état d'envoi
+          has assets/public/index.html native-bridge.js
+          has assets/public/config.js "https://petits-heros-production.up.railway.app"
+          AAPT=$(ls -d "$ANDROID_HOME"/build-tools/*/aapt2 | sort -V | tail -1)
+          B=$("$AAPT" dump badging "$APK" | sed -n 's/^package: //p'); echo "$B"
+          echo "$B" | grep -q "name='fr.petitsheros.app'" || { echo "::error::mauvaise identité"; exit 1; }
+          echo "$B" | grep -q "versionCode='${VERSION_CODE}'" || { echo "::error::versionCode ≠ ${VERSION_CODE}"; exit 1; }
+          AS=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$AS" verify --verbose --print-certs "$APK" | tee /tmp/sig.txt | grep -E "Verified using|certificate DN|SHA-256"
+          grep -q "Verified using v2.*true" /tmp/sig.txt || { echo "::error::signature v2 absente"; exit 1; }
+          DIGEST=$(sed -n 's/.*certificate SHA-256 digest: *//p' /tmp/sig.txt | head -1)
+          {
+            echo "### APK de test vérifié"
+            echo "- Identité \`fr.petitsheros.app\`, version ${VERSION_NAME}, **versionCode ${VERSION_CODE}** (doit rester supérieur à celui déjà installé)"
+            echo "- Bouton « J’ai un code d’invitation », état « Enregistrement… » et adresse HTTPS du serveur présents dans l'APK"
+            echo "- Certificat de débogage (SHA-256) : \`${DIGEST}\`"
+            if [ "$KEY_RESTORED" = "true" ]; then echo "- Clé de débogage **restaurée** : même signature que le build précédent → mise à jour directe possible."
+            else echo "- Clé de débogage **créée à neuf** (aucune clé en cache) : signature différente des builds précédents → **désinstaller l'ancienne version avant d'installer celle-ci**. Les builds suivants se mettront à jour directement."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Conserver l'APK de test (signature de débogage)
         uses: actions/upload-artifact@v4
         with:
