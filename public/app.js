@@ -36,7 +36,7 @@ const CACHE_MAX_AGE = 7 * 86400000; // une copie hors connexion plus vieille est
 function wipeLocal() {
   try { localStorage.removeItem('ph_cache'); } catch { /* indisponible */ }
   stopPolling();
-  S.st = null; S.hist = null; S.rewardChild = null; S.sheet = null; S.undo = null; S.recovery = null;
+  S.st = null; S.hist = null; S.rewardChild = null; S.sheet = null; S.undo = null; S.recovery = null; S.declined = false;
   intents.clear();
   if (NATIVE) { S.token = ''; window.PHNative.clearToken(); }
   const sh = document.getElementById('sheet'); if (sh) sh.innerHTML = '';
@@ -547,6 +547,24 @@ function renderSheet(fromPoll) {
 }
 const sheetErr = (msg) => { if (S.sheet) S.sheet.error = msg; const el = $('#sheet-err'); if (el) el.innerHTML = msg ? `<div class="err">${esc(msg)}</div>` : ''; };
 
+// -- « Point non validé » : simple retour visuel pour l'enfant. AUCUN appel au serveur : ni point, ni solde, ni transaction, ni malus.
+function showDeclined() {
+  closeSheetQuiet();                       // ferme « Donner des points » sans rien enregistrer
+  clearToast();
+  S.declined = true;
+  document.body.classList.add('sheet-open');
+  $('#sheet').innerHTML = `<div class="declined" role="alertdialog" aria-modal="true" aria-labelledby="decl-t" aria-describedby="decl-m">
+    <div class="declined-in"><div class="big-x" aria-hidden="true">✕</div>
+    <h2 id="decl-t">Point non validé</h2><p id="decl-m">Cette fois, cette action ne donne pas de point.</p>
+    <button class="btn primary block" id="decl-ok" data-act="declinedOk">D’accord</button></div></div>`;
+  $('#decl-ok')?.focus();
+}
+function closeDeclined() {
+  if (!S.declined) return;
+  S.declined = false; $('#sheet').innerHTML = ''; document.body.classList.remove('sheet-open');
+  go('#/children'); render();              // retour à la liste des enfants
+}
+
 // -- points
 const posActions = (c) => S.st.actions.filter((a) => !a.archived && a.value > 0 && eligible(a, c.id));
 const negActions = (c) => S.st.actions.filter((a) => !a.archived && a.value < 0 && eligible(a, c.id));
@@ -591,7 +609,8 @@ function pointsSheet(s) {
   else if (s.tab === 'behavior') body = `<p class="muted small">Des repères, pas des règles : seulement après un rappel clair, avec bienveillance. Jamais pour des pleurs, des réveils de nuit ou des besoins essentiels.</p>${list(negActions(c))}`;
   else body = quick(st.family.quickMinus.map((v) => -v), 'neg') + custom + reason(true);
   return [`<span style="font-size:1.6rem">${c.avatar}</span> ${plus ? 'Donner' : 'Retirer'} des points · ${esc(c.name)}`,
-    `<div class="seg">${tabs.map(([k, l]) => `<button class="${s.tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${l}</button>`).join('')}</div>
+    `${plus && !s.sent ? '<div class="declined-row"><button class="btn ghost sm quiet" data-act="notValidated">Point non validé</button></div>' : ''}
+     <div class="seg">${tabs.map(([k, l]) => `<button class="${s.tab === k ? 'on' : ''}" data-act="tab" data-t="${k}">${l}</button>`).join('')}</div>
      ${body}<div class="confirm-bar" id="cslot">${confirmBar(s)}</div>`];
 }
 
@@ -828,6 +847,8 @@ const A = {
   recoveryRegen: () => openSheet({ kind: 'regen' }),
 
   // points
+  notValidated: () => showDeclined(),
+  declinedOk: () => closeDeclined(),
   points: (d) => {
     const plus = d.sign === '+', u = S.unresolved?.[d.id];
     if (u) { openSheet({ kind: 'points', childId: d.id, sign: u.body.value > 0 ? '+' : '-', tab: u.tab, op: u.op, sent: u.body, value: u.body.value, reason: u.body.reason || '', actionId: u.body.actionId || null }); return; }
@@ -1022,11 +1043,12 @@ document.addEventListener('input', (e) => {
   const slot = $('#cslot'); if (slot) slot.innerHTML = confirmBar(S.sheet);
   document.querySelectorAll('.quick button').forEach((q) => q.classList.toggle('on', Number(q.dataset.v) === S.sheet.value));
 });
-window.addEventListener('hashchange', () => { clearToast(); S.hist = null; if (!S.sheet) render(); else userClose(); window.scrollTo(0, 0); });
+window.addEventListener('hashchange', () => { if (S.declined) { S.declined = false; $('#sheet').innerHTML = ''; document.body.classList.remove('sheet-open'); } clearToast(); S.hist = null; if (!S.sheet) render(); else userClose(); window.scrollTo(0, 0); });
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.installEvt = e; });
 window.addEventListener('appinstalled', () => { S.installEvt = null; if (!S.sheet) render(); toast('Application installée ✓'); });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && S.sheet) userClose();
+  if (e.key === 'Escape' && S.declined) closeDeclined();
+  else if (e.key === 'Escape' && S.sheet) userClose();
   // Entrée dans un champ de saisie des points = enregistrer (un seul geste, sans viser le bouton)
   if (e.key === 'Enter' && S.sheet?.kind === 'points' && e.target.matches?.('input[data-bind]') && pointsValid(S.sheet)) { e.preventDefault(); A.pointsConfirm(); }
 });
@@ -1038,6 +1060,7 @@ document.addEventListener('pointerdown', (e) => {
 
 // bouton Retour Android : ferme d'abord la fenêtre ouverte, remonte d'un niveau, puis quitte à la racine
 function handleBack() {
+  if (S.declined) { closeDeclined(); return; }
   if (S.sheet) { userClose(); return; }
   if (S.me && S.recovery) return; // codes de secours : il faut les valider
   if (!S.me) { if (S.auth.mode !== 'login') { S.auth = { mode: 'login', error: '', info: '' }; render(); } else window.PHNative.exit(); return; }

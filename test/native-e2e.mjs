@@ -106,6 +106,18 @@ await P.evaluate(() => window.PHNative._test.back());
 assert.equal(await P.evaluate(() => window.__exited), 1, 'quitte à la racine');
 ok('bouton Retour : ferme la fenêtre, remonte d’un niveau (profil, bibliothèque, onglets), quitte seulement à la racine');
 
+// 6b. « Point non validé » dans l'application : le bouton Retour ferme l'écran, rien n'est enregistré
+{
+  const balBefore = (await S.query('SELECT sum(balance) AS s FROM children')).rows[0].s, txBefore = (await S.query('SELECT count(*) FROM transactions')).rows[0].count;
+  await P.click('.tabs a:has-text("Enfants")');
+  await P.click('.child.mini:first-child [data-act=points][data-sign="+"]'); await P.click('[data-act=notValidated]'); await P.waitForSelector('.declined');
+  assert.match(await P.innerText('.declined'), /Point non validé[\s\S]*Cette fois, cette action ne donne pas de point\.[\s\S]*D’accord/);
+  await P.evaluate(() => window.PHNative._test.back()); await P.waitForSelector('.declined', { state: 'detached' }); await P.waitForSelector('.child.mini');
+  assert.equal(await P.evaluate(() => window.__exited || 0), 1, 'le Retour n’a pas quitté l’application (1 sortie = celle du test précédent)');
+  assert.equal((await S.query('SELECT sum(balance) AS s FROM children')).rows[0].s, balBefore); assert.equal((await S.query('SELECT count(*) FROM transactions')).rows[0].count, txBefore);
+  ok('« Point non validé » dans l’application : écran affiché, bouton Retour ferme l’écran sans quitter l’application, soldes et historique inchangés');
+}
+
 // 7. zones de sécurité Android (variables injectées par Capacitor) et clavier
 await P.evaluate(() => { const s = document.documentElement.style; s.setProperty('--safe-area-inset-top', '36px'); s.setProperty('--safe-area-inset-bottom', '28px'); });
 const sa = await P.evaluate(() => ({ top: parseFloat(getComputedStyle(document.querySelector('.top')).paddingTop), tabs: parseFloat(getComputedStyle(document.querySelector('.tabs')).paddingBottom), tabsRect: document.querySelector('.tabs').getBoundingClientRect().height }));
