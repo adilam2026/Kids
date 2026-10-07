@@ -17,7 +17,7 @@
     "redeploy-test": "node test/redeploy.mjs",
     "backup": "sh scripts/backup.sh",
     "android:web": "node scripts/build-www.mjs && npx cap sync android",
-    "android:icons": "node scripts/make-android-icons.mjs",
+    "android:icons": "python3 scripts/make-android-icon.py",
     "native-test": "node test/native-e2e.mjs",
     "delete-test": "node test/delete-account.mjs",
     "slow-test": "node test/slow-network.mjs",

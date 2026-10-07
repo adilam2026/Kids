@@ -24,6 +24,10 @@ on:
         description: 'Publier une Release GitHub avec l’APK signé (mode release)'
         type: boolean
         default: true
+      build_aab:
+        description: 'Produire aussi le bundle .aab pour Google Play (mode release). Faux = APK seul, publié comme « pré-version » d’essai'
+        type: boolean
+        default: false
 
 concurrency:
   group: android-${{ github.ref }}
@@ -69,6 +73,7 @@ jobs:
         run: |
           APK=$(ls android/app/build/outputs/apk/debug/*.apk | head -1)
           MODE=debug EXPECTED_VERSION_CODE="$VERSION_CODE" sh android/scripts/check-apk-content.sh "$APK"
+          python3 -m pip install --quiet pillow && python3 android/scripts/check-icon.py "$APK"
           AS=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$AS" verify --verbose --print-certs "$APK" | tee /tmp/sig.txt | grep -E "Verified using|certificate DN|SHA-256"
           grep -q "Verified using v2.*true" /tmp/sig.txt || { echo "::error::signature v2 absente"; exit 1; }
@@ -196,23 +201,29 @@ jobs:
           PH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           PH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           PH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease bundleRelease
+          BUILD_AAB: ${{ inputs.build_aab || startsWith(github.ref, 'refs/tags/android-v') }}
+        run: |
+          if [ "$BUILD_AAB" = true ]; then ./gradlew --no-daemon assembleRelease bundleRelease; else ./gradlew --no-daemon assembleRelease; fi
       - name: Vérifier signature, identité et version (APK + AAB)
         env:
           EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_CERT_SHA256 }}
           EXPECTED_VERSION_CODE: ${{ env.VERSION_CODE }}
+          BUILD_AAB: ${{ inputs.build_aab || startsWith(github.ref, 'refs/tags/android-v') }}
         run: |
           APK=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
           echo "APK : $APK"
           sh android/scripts/verify-apk.sh "$APK"
           MODE=release sh android/scripts/check-apk-content.sh "$APK"
-          AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -1)
-          echo "AAB : $AAB"
-          BUNDLETOOL="$(sh android/scripts/get-bundletool.sh)" sh android/scripts/verify-aab.sh "$AAB"
+          python3 -m pip install --quiet pillow && python3 android/scripts/check-icon.py "$APK"
           mkdir -p dist
           cp "$APK" "dist/petits-heros-${VERSION_NAME}-build${VERSION_CODE}.apk"
-          cp "$AAB" "dist/petits-heros-${VERSION_NAME}-build${VERSION_CODE}.aab"
-          (cd dist && sha256sum *.apk *.aab > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          if [ "$BUILD_AAB" = true ]; then
+            AAB=$(ls android/app/build/outputs/bundle/release/*.aab | head -1)
+            echo "AAB : $AAB"
+            BUNDLETOOL="$(sh android/scripts/get-bundletool.sh)" sh android/scripts/verify-aab.sh "$AAB"
+            cp "$AAB" "dist/petits-heros-${VERSION_NAME}-build${VERSION_CODE}.aab"
+          fi
+          (cd dist && sha256sum petits-heros-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
       - name: Supprimer la clé du disque
         if: always()
         run: rm -f "$RUNNER_TEMP/release.p12"
@@ -225,9 +236,11 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
+          BUILD_AAB: ${{ inputs.build_aab || startsWith(github.ref, 'refs/tags/android-v') }}
         run: |
           TAG="android-build-${VERSION_CODE}"
-          gh release create "$TAG" dist/*.apk dist/*.aab dist/SHA256SUMS.txt --target "$GITHUB_SHA" \
+          PRE=""; [ "$BUILD_AAB" = true ] || PRE="--prerelease"   # APK seul = version d'essai, pas une version de référence
+          gh release create "$TAG" dist/* $PRE --target "$GITHUB_SHA" \
             --title "Petits Héros ${VERSION_NAME} (build ${VERSION_CODE})" \
             --notes "APK Android signé + bundle .aab (Google Play : à importer dans la Play Console, ne s'installe pas directement). Serveur : ${PH_API_BASE}. Installer : télécharger le .apk sur le téléphone et l'ouvrir (autoriser « installer des applications inconnues » pour le navigateur). Mise à jour : installer le nouvel APK par-dessus (même clé de signature)."
           echo "### APK publié" >> "$GITHUB_STEP_SUMMARY"
