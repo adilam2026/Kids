@@ -26,7 +26,7 @@ const APP_BUILD = Number(window.PH_BUILD || 0), APP_VERSION = window.PH_VERSION 
 
 const S = {
   token: '', upgrade: false, me: null, st: null, offline: false, busy: false, sheet: null, pulse: null,
-  prefs: load('ph_prefs', { anim: !matchMedia('(prefers-reduced-motion: reduce)').matches }), lock: load('ph_lock', { on: false }),
+  prefs: { sound: true, ...load('ph_prefs', { anim: !matchMedia('(prefers-reduced-motion: reduce)').matches }) }, lock: load('ph_lock', { on: false }),
   rewardChild: null, hist: null, auth: { mode: 'login', error: '', info: '' }, libOpen: false,
 };
 
@@ -197,6 +197,58 @@ const installCard = () => isStandalone()
   : `<div class="card" style="background:var(--soft)"><div style="display:flex;gap:12px;align-items:center"><div style="font-size:2.2rem">📲</div>
       <div style="flex:1"><b>Installer l’application</b><div class="muted small">Icône sur l’écran d’accueil, plein écran</div></div></div>
       <button class="btn primary block" style="margin-top:10px" data-act="installApp">Installer l’application</button></div>`;
+
+// ---------- sons ----------
+// Générés localement avec Web Audio (aucun fichier, aucun téléchargement, aucun droit d'auteur).
+//  • gain / bonus : « ding-ding » montant et joyeux (~1 s) ; retrait : « dong » descendant et doux (~0,5 s).
+//  • joués UNIQUEMENT quand le serveur a confirmé l'enregistrement, au plus une fois par mouvement (clics répétés, réessai, resynchronisation : jamais de second son).
+//  • le son ne doit JAMAIS gêner l'enregistrement : tout est protégé par try/catch et exécuté après la mise à jour de l'écran.
+//  • volume modéré ; Android : suit le volume MULTIMÉDIA du téléphone (le comportement en mode silencieux n'est pas garanti).
+let audioCtx = null;
+const soundedOps = new Set();
+function getAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    audioCtx ||= new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  } catch { return null; }
+}
+// « Amorçage » discret au premier toucher (politique de lecture automatique des navigateurs) : crée le contexte, n'émet aucun son.
+document.addEventListener('pointerdown', () => { if (S.prefs.sound && !audioCtx) getAudio(); }, { passive: true });
+function bell(ctx, t0, freq, dur, peak) {
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.001, t0);
+  g.gain.exponentialRampToValueAtTime(peak, t0 + 0.012);        // attaque courte
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);           // résonance qui s'éteint
+  g.connect(ctx.destination);
+  for (const [mult, amp] of [[1, 1], [2.01, 0.28]]) {            // fondamentale + harmonique (timbre de clochette)
+    const o = ctx.createOscillator(), a = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(freq * mult, t0); a.gain.value = amp;
+    o.connect(a); a.connect(g); o.start(t0); o.stop(t0 + dur + 0.05);
+  }
+}
+function synth(kind) {
+  const ctx = getAudio(); if (!ctx) return;
+  const t = ctx.currentTime + 0.02;
+  if (kind === 'gain') { bell(ctx, t, 784, 0.7, 0.16); bell(ctx, t + 0.3, 1175, 1.0, 0.16); }  // sol5 puis ré6 : deux « ding » montants, ≈ 1 s audible
+  else {                                                                                            // « dong » : note qui descend doucement, ≈ 0,5 s
+    const g = ctx.createGain(), o = ctx.createOscillator();
+    g.gain.setValueAtTime(0.001, t); g.gain.exponentialRampToValueAtTime(0.17, t + 0.02); g.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+    o.type = 'sine'; o.frequency.setValueAtTime(392, t); o.frequency.exponentialRampToValueAtTime(262, t + 0.55);
+    o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + 0.75);
+  }
+}
+// opKey = identifiant du mouvement confirmé par le serveur (réponse rejouée = même clé = pas de second son)
+function playSound(kind, opKey) {
+  try {
+    if (!S.prefs.sound || !opKey || soundedOps.has(opKey)) return;
+    soundedOps.add(opKey);
+    if (soundedOps.size > 200) soundedOps.delete(soundedOps.values().next().value);
+    synth(kind);
+  } catch { /* une panne audio ne doit jamais empêcher l'enregistrement */ }
+}
 
 // ---------- effets ----------
 const animOn = () => S.prefs.anim && !matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -494,6 +546,7 @@ function familyView() {
   <button class="row${nm()}" data-act="suggest"><div class="ic">✨</div><div class="tx">Ajouter les suggestions<small>Actions, petits malus et récompenses : aperçu et choix</small></div>›</button>
   <a class="row" href="#/library"><div class="ic">📚</div><div class="tx">Bibliothèque d’actions<small>Créer, modifier, favoris</small></div>›</a>
   ${owner ? `<button class="row${nm()}" data-act="quickForm"><div class="ic">⚡</div><div class="tx">Valeurs rapides<small>+ ${st.family.quickPlus.join(', ')} · − ${st.family.quickMinus.join(', ')}</small></div>›</button>` : ''}
+  <button class="row" data-act="toggleSound" role="switch" aria-checked="${S.prefs.sound}"><div class="ic">${S.prefs.sound ? '🔔' : '🔕'}</div><div class="tx">Sons<small>${S.prefs.sound ? 'Activés' : 'Désactivés'} · réglés par le volume multimédia du téléphone</small></div><b>${S.prefs.sound ? 'Oui' : 'Non'}</b></button>
   <button class="row" data-act="toggleAnim"><div class="ic">✨</div><div class="tx">Animations<small>${matchMedia('(prefers-reduced-motion: reduce)').matches ? 'Réduites (réglage de l’appareil)' : S.prefs.anim ? 'Activées' : 'Désactivées'}</small></div><b>${S.prefs.anim ? 'Oui' : 'Non'}</b></button>
   <button class="row" data-act="lockOn"><div class="ic">🔒</div><div class="tx">Mode enfant<small>Lecture seule, déverrouillage par code</small></div>›</button>
   ${arch.length ? `<h2 class="sec">Profils archivés</h2>${arch.map((c) => `<div class="row" style="cursor:default"><div class="ic">${c.avatar}</div><div class="tx">${esc(c.name)}<small>${c.balance} pts</small></div>
@@ -881,6 +934,7 @@ const A = {
     render();
     if (gain) celebrate(r.type === 'bonus');
     toast(`<b>${esc(c.name)}</b> : ${signed(r.value)} → ${pts(r.balance)}`, { undo: () => undoPost(`/api/transactions/${r.txId}/cancel`) });
+    playSound(r.value > 0 ? 'gain' : 'loss', r.txId);   // son seulement maintenant : le serveur a confirmé (jamais pour une erreur)
     // 3) resynchronisation complète en arrière-plan (jamais bloquante)
     refresh(true);
   }),
@@ -912,6 +966,7 @@ const A = {
     const name = ch0.collective ? 'Toute l’équipe' : kid(d.child).name;
     const gained = ids.map((i) => kid(i).balance - bal0[i]);
     render(); celebrate(won);
+    playSound('gain', r.eventId);     // validation de défi confirmée = gain (et bonus éventuel)
     toast(`<b>${esc(name)}</b> : ${ch0.collective ? '+' + gained[0] : signed(gained[0])}${won ? ' · défi réussi ! 🎉' : ''}`, { undo: () => undoPost(`/api/completions/${r.eventId}/cancel`) });
   }),
   archiveChallenge: (d) => ask('Archiver ce défi ?', 'Il disparaît de la liste. Les points déjà gagnés restent acquis.', 'Archiver', () => run(async () => { await write('POST', `/api/challenges/${d.id}/archive`, {}, `ac:${d.id}`); closeSheet(); })),
@@ -950,6 +1005,7 @@ const A = {
   removeMember: (d) => run(async () => { await api('DELETE', `/api/family/members/${d.id}`); await refresh(true); closeSheet(); }),
   leave: () => ask('Quitter la famille ?', 'Tu n’auras plus accès aux données de cette famille.', 'Quitter', () => run(async () => { await api('POST', '/api/family/leave', {}); stopPolling(); S.st = null; closeSheet(); await boot(); })),
   quickForm: () => openSheet({ kind: 'quickForm' }),
+  toggleSound: () => { S.prefs.sound = !S.prefs.sound; save('ph_prefs', S.prefs); render(); },  // mémorisé par appareil, sans aperçu sonore
   toggleAnim: () => { S.prefs.anim = !S.prefs.anim; save('ph_prefs', S.prefs); document.body.classList.toggle('noanim', !S.prefs.anim); render(); },
   lockOn: () => openSheet({ kind: 'lockSet' }),
   unlock: () => openSheet({ kind: 'unlock' }),

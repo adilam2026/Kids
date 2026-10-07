@@ -73,6 +73,12 @@ npm run e2e              # « téléphones » Chromium (Playwright requis) : int
 
 Voir [`docs/ANDROID.md`](docs/ANDROID.md) : projet Capacitor (`android/`), interface embarquée, connexion par jeton Bearer, workflow GitHub Actions de compilation/signature, procédure de mise à jour. `npm run native-test` teste l'interface embarquée dans Chromium.
 
+## Sons
+
+Deux sons courts **synthétisés localement** (Web Audio : aucun fichier, aucun téléchargement, aucun droit à gérer) : « ding-ding » montant (gain, bonus, validation de défi ; ≈ 1 s) et « dong » descendant doux (retrait ; ≈ 0,5 s). Règles : joués **uniquement après confirmation du serveur**, **au plus un par mouvement** (clics répétés, réessai, resynchronisation, autre téléphone : silence), jamais pour une erreur, un refus, « Point non validé », une annulation ou un échange de récompense. Réglage **Famille › Sons**, mémorisé **par appareil** (sans son d'aperçu). Une panne audio n'empêche jamais l'enregistrement. `npm run sound-test` (espion Web Audio + rendu hors ligne mesurant durées, fréquences et niveau).
+
+Android : le son suit le **volume multimédia** (les boutons de volume le règlent dans l'application). Le comportement en **mode silencieux / ne pas déranger** dépend du téléphone : **non testé**, ne pas le considérer comme garanti.
+
 ## Suggestions et installation
 
 * **Ajouter les suggestions** (Famille, Bibliothèque ou Récompenses) : aperçu avec cases à cocher, doublons détectés (titre normalisé ou ancien intitulé) et grisés, jamais de remplacement d'une action ou récompense existante (même personnalisée), aucun solde ni historique modifié. Le catalogue est dans `server/seed.js` ; l'ajout est atomique et idempotent. Aucun malus pour pleurs, chagrin ou réveils nocturnes (vérifié par test).
